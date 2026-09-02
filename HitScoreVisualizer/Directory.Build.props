@@ -7,7 +7,7 @@
 		<PluginId>HitScoreVisualizer</PluginId>
 		<PluginName>HitScoreVisualizer</PluginName>
 		<Authors>Eris</Authors>
-		<Version>3.7.3</Version>
+		<Version>3.7.4</Version>
 		<GameVersion>1.42.0</GameVersion>
 		<Description>
 			Visualizes the scores of your hits! Overly complex config options! Numbers?
@@ -21,9 +21,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<DependsOn Include="BSIPA" Version="^4.3.5" />
-		<DependsOn Include="SiraUtil" Version="^3.1.14" />
-		<DependsOn Include="BeatSaberMarkupLanguage" Version="^1.12.4" />
+		<DependsOn Include="BSIPA" Version="^4.3.0" />
+		<DependsOn Include="SiraUtil" Version="^3.3.0" />
+		<DependsOn Include="BeatSaberMarkupLanguage" Version="^1.14.0" />
 	</ItemGroup>
 
 	<PropertyGroup>
