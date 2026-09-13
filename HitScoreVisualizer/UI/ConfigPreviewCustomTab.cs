@@ -155,7 +155,7 @@ internal class ConfigPreviewCustomTab
 	{
 		if (config is not null)
 		{
-			if (config.BadCutDisplays is not null or [])
+			if (config.BadCutDisplays is { Count: > 0 })
 			{
 				allBadCuts = new(config.BadCutDisplays.Where(x => x.Type is BadCutDisplayType.All));
 				wrongDirections = new(config.BadCutDisplays.Where(x => x.Type is BadCutDisplayType.All or BadCutDisplayType.WrongDirection));
@@ -163,7 +163,7 @@ internal class ConfigPreviewCustomTab
 				bombs = new(config.BadCutDisplays.Where(x => x.Type is BadCutDisplayType.All or BadCutDisplayType.Bomb));
 			}
 
-			if (config.MissDisplays is not null or [])
+			if (config.MissDisplays is { Count: > 0 })
 			{
 				misses = new(config.MissDisplays);
 			}
