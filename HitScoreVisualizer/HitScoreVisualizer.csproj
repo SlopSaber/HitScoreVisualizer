@@ -1,7 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-	<Import Project="HitScoreVisualizer.csproj.user" Condition="Exists('HitScoreVisualizer.csproj.user')" />
-
 	<PropertyGroup>
 		<TargetFramework>net472</TargetFramework>
 		<LangVersion>latest</LangVersion>
