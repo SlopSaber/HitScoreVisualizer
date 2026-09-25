@@ -27,6 +27,7 @@
 
 	<ItemGroup>
 		<EmbeddedResource Include="UI\Views\*.bsml" />
+		<EmbeddedResource Include="Shaders\hsv-text-overlay.bundle" LogicalName="HitScoreVisualizer.Shaders.hsv-text-overlay.bundle" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -34,6 +35,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Reference Include="UnityEngine.AssetBundleModule">
+			<HintPath>$(GameDirectory)\Beat Saber_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
 		<Reference Include="0Harmony">
 			<HintPath>$(GameDirectory)\Libs\0Harmony.dll</HintPath>
 			<Private>false</Private>

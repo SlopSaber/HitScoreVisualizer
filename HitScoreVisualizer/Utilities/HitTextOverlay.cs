@@ -1,4 +1,4 @@
-using System.Linq;
+using System.IO;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -7,32 +7,20 @@ namespace HitScoreVisualizer.Utilities;
 
 internal static class HitTextOverlay
 {
-	private const string OverlayShaderName = "TextMeshPro/Distance Field Overlay";
+	private const string BundleResourceName = "HitScoreVisualizer.Shaders.hsv-text-overlay.bundle";
+	private static AssetBundle? overlayBundle;
 	private static Shader? overlayShader;
-	private static bool missingShaderLogged;
+	private static bool shaderLoadAttempted;
 	private static bool shaderChoiceLogged;
 
 	public static void Configure(TextMeshPro text)
 	{
 		// fontMaterial gives this text its own material, leaving menu previews and other mods alone.
 		var material = text.fontMaterial;
-		var shader = overlayShader;
+		var shader = GetOverlayShader();
 		if (shader == null)
 		{
-			shader = Shader.Find(OverlayShaderName) ?? Resources.FindObjectsOfTypeAll<Shader>()
-				.FirstOrDefault(candidate => candidate.name == OverlayShaderName);
-			if (shader == null || !shader.isSupported)
-			{
-				if (!missingShaderLogged)
-				{
-					Plugin.Log.Warn("TMP overlay shader is unavailable; scenery can still occlude HSV text.");
-					missingShaderLogged = true;
-				}
-
-				return;
-			}
-
-			overlayShader = shader;
+			return;
 		}
 
 		if (!shaderChoiceLogged)
@@ -48,5 +36,34 @@ internal static class HitTextOverlay
 		material.renderQueue = 4999;
 		text.renderer.sortingLayerID = 0;
 		text.renderer.sortingOrder = short.MaxValue - 1;
+	}
+
+	private static Shader? GetOverlayShader()
+	{
+		if (shaderLoadAttempted)
+		{
+			return overlayShader;
+		}
+
+		shaderLoadAttempted = true;
+		using var stream = typeof(HitTextOverlay).Assembly.GetManifestResourceStream(BundleResourceName);
+		if (stream == null)
+		{
+			Plugin.Log.Error("HSV no-bloom overlay shader bundle is missing.");
+			return null;
+		}
+
+		using var memory = new MemoryStream();
+		stream.CopyTo(memory);
+		overlayBundle = AssetBundle.LoadFromMemory(memory.ToArray());
+		var shaders = overlayBundle?.LoadAllAssets<Shader>();
+		overlayShader = shaders is { Length: > 0 } ? shaders[0] : null;
+		if (overlayShader == null || !overlayShader.isSupported)
+		{
+			Plugin.Log.Error("HSV no-bloom overlay shader could not be loaded.");
+			return null;
+		}
+
+		return overlayShader;
 	}
 }
