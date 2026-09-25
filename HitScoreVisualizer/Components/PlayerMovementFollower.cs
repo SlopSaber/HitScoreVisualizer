@@ -1,17 +1,91 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using UnityEngine;
+using Zenject;
 
 namespace HitScoreVisualizer.Components;
 
-internal class PlayerMovementFollower
+internal class PlayerMovementFollower : ILateTickable, IDisposable
 {
-	private readonly PlayerTransforms playerTransforms;
+	private readonly record struct LaneSample(float Time, Quaternion Rotation, string[] Tracks);
 
-	public PlayerMovementFollower(PlayerTransforms playerTransforms)
+	private readonly PlayerTransforms playerTransforms;
+	private readonly AudioTimeSyncController audioTimeSyncController;
+	private readonly List<LaneSample> laneSamples = new();
+	private readonly IDictionary? heckTracks;
+	private readonly MethodInfo? getTrackProperty;
+	private readonly bool leftHanded;
+	private readonly bool hasLaneRotation;
+	private Transform? laneOrigin;
+
+	public PlayerMovementFollower(PlayerTransforms playerTransforms, AudioTimeSyncController audioTimeSyncController,
+		IReadonlyBeatmapData beatmapData, GameplayCoreSceneSetupData sceneData, DiContainer container)
 	{
 		this.playerTransforms = playerTransforms;
+		this.audioTimeSyncController = audioTimeSyncController;
+		leftHanded = sceneData.playerSpecificSettings.leftHanded;
+
+		var trackType = Type.GetType("Heck.Animation.Track, Heck");
+		var extensionsType = Type.GetType("Heck.Animation.AnimationExtensions, Heck");
+		if (trackType != null && extensionsType != null)
+		{
+			var dictionaryType = typeof(Dictionary<,>).MakeGenericType(typeof(string), trackType);
+			heckTracks = container.TryResolve(dictionaryType) as IDictionary;
+			getTrackProperty = extensionsType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+				.FirstOrDefault(method => method.Name == "GetProperty" && method.IsGenericMethodDefinition)
+				?.MakeGenericMethod(typeof(Quaternion));
+		}
+
+		if (sceneData.beatmapKey.characteristic is BeatmapCharacteristic.Degree90 or BeatmapCharacteristic.Degree360)
+		{
+			return;
+		}
+
+		foreach (var note in beatmapData.GetBeatmapDataItems<NoteData>(0).OrderBy(note => note.time))
+		{
+			if (note.gameplayType == NoteData.GameplayType.Bomb ||
+			    (laneSamples.Count > 0 && Mathf.Approximately(laneSamples[laneSamples.Count - 1].Time, note.time)))
+			{
+				continue;
+			}
+
+			var customData = note.GetType().GetProperty("customData")?.GetValue(note) as IDictionary<string, object>;
+			laneSamples.Add(new LaneSample(note.time, ReadRotation(customData), ReadTracks(customData)));
+		}
+
+		hasLaneRotation = laneSamples.Any(sample => Quaternion.Angle(sample.Rotation, Quaternion.identity) > 0.01f ||
+		                                         sample.Tracks.Length > 0);
 	}
 
 	private Transform? PlayerOrigin => playerTransforms._originTransform.parent;
+
+	private Transform? LaneOrigin
+	{
+		get
+		{
+			var playerOrigin = PlayerOrigin;
+			if (playerOrigin == null)
+			{
+				return null;
+			}
+
+			if (laneOrigin == null)
+			{
+				laneOrigin = new GameObject("HSV Player Lane").transform;
+				laneOrigin.localRotation = CurrentLaneRotation();
+			}
+
+			if (laneOrigin.parent != playerOrigin)
+			{
+				laneOrigin.SetParent(playerOrigin, false);
+			}
+
+			return laneOrigin;
+		}
+	}
 
 	public bool HasPlayerTrack
 	{
@@ -29,16 +103,45 @@ internal class PlayerMovementFollower
 		}
 	}
 
+	public bool ShouldFollowEffects => HasPlayerTrack || hasLaneRotation;
 	public Vector3 PlayerOriginPosition => PlayerOrigin?.position ?? Vector3.zero;
+	public Vector3 PlayerPointToWorld(Vector3 position) => LaneOrigin?.TransformPoint(position) ?? position;
 
-	public Vector3 PlayerPointToWorld(Vector3 position) => PlayerOrigin?.TransformPoint(position) ?? position;
-
-	public void Attach(FlyingObjectEffect effect, Vector3 targetPosition, Quaternion worldRotation)
+	public void LateTick()
 	{
-		var origin = PlayerOrigin;
+		if (laneOrigin != null)
+		{
+			laneOrigin.localRotation = CurrentLaneRotation();
+		}
+	}
+
+	public void Dispose()
+	{
+		if (laneOrigin != null)
+		{
+			UnityEngine.Object.Destroy(laneOrigin.gameObject);
+		}
+	}
+
+	public void Attach(FlyingObjectEffect effect, Vector3 targetPosition, Quaternion worldRotation, bool fixedPosition = false)
+	{
+		var origin = LaneOrigin;
 		if (origin == null)
 		{
 			return;
+		}
+
+		if (hasLaneRotation)
+		{
+			var laneRotation = CurrentLaneRotation();
+			if (!fixedPosition)
+			{
+				var playerPosition = PlayerOriginPosition;
+				targetPosition = playerPosition + laneRotation * Quaternion.Inverse(worldRotation) *
+					(targetPosition - playerPosition);
+			}
+
+			worldRotation = (PlayerOrigin?.rotation ?? Quaternion.identity) * laneRotation;
 		}
 
 		var effectTransform = effect.transform;
@@ -49,5 +152,107 @@ internal class PlayerMovementFollower
 		effect._rotation = Quaternion.Inverse(origin.rotation) * worldRotation;
 		effectTransform.localPosition = effect._startPos;
 		effectTransform.localRotation = effect._rotation;
+	}
+
+	private Quaternion CurrentLaneRotation()
+	{
+		if (laneSamples.Count == 0)
+		{
+			return Quaternion.identity;
+		}
+
+		float songTime = audioTimeSyncController.songTime;
+		int low = 0;
+		int high = laneSamples.Count - 1;
+		int current = -1;
+		while (low <= high)
+		{
+			int middle = low + ((high - low) / 2);
+			if (laneSamples[middle].Time <= songTime)
+			{
+				current = middle;
+				low = middle + 1;
+			}
+			else
+			{
+				high = middle - 1;
+			}
+		}
+
+		if (current < 0)
+		{
+			return SampleRotation(laneSamples[0]);
+		}
+
+		var from = laneSamples[current];
+		var fromRotation = SampleRotation(from);
+		if (current == laneSamples.Count - 1)
+		{
+			return fromRotation;
+		}
+
+		var to = laneSamples[current + 1];
+		if (heckTracks != null && from.Tracks.Length > 0 && from.Tracks.SequenceEqual(to.Tracks))
+		{
+			return fromRotation;
+		}
+
+		return Quaternion.Slerp(fromRotation, SampleRotation(to), Mathf.InverseLerp(from.Time, to.Time, songTime));
+	}
+
+	private Quaternion SampleRotation(LaneSample sample)
+	{
+		var rotation = sample.Rotation;
+		if (heckTracks == null || getTrackProperty == null)
+		{
+			return rotation;
+		}
+
+		foreach (var trackName in sample.Tracks)
+		{
+			if (heckTracks.Contains(trackName) &&
+			    getTrackProperty.Invoke(null, [heckTracks[trackName], "offsetWorldRotation"]) is Quaternion offset)
+			{
+				rotation *= Mirror(offset);
+			}
+		}
+
+		return rotation;
+	}
+
+	private Quaternion ReadRotation(IDictionary<string, object>? customData)
+	{
+		if (customData == null ||
+		    (!customData.TryGetValue("worldRotation", out var value) &&
+		     !customData.TryGetValue("_rotation", out value)) || value == null)
+		{
+			return Quaternion.identity;
+		}
+
+		var rotation = value is IList angles && angles.Count >= 3
+			? Quaternion.Euler(Convert.ToSingle(angles[0]), Convert.ToSingle(angles[1]), Convert.ToSingle(angles[2]))
+			: Quaternion.Euler(0f, Convert.ToSingle(value), 0f);
+		return Mirror(rotation);
+	}
+
+	private Quaternion Mirror(Quaternion rotation) => leftHanded
+		? new Quaternion(rotation.x, -rotation.y, -rotation.z, rotation.w)
+		: rotation;
+
+	private static string[] ReadTracks(IDictionary<string, object>? customData)
+	{
+		if (customData == null ||
+		    (!customData.TryGetValue("track", out var value) &&
+		     !customData.TryGetValue("_track", out value)) || value == null)
+		{
+			return [];
+		}
+
+		if (value is string name)
+		{
+			return [name];
+		}
+
+		return value is IEnumerable names ? names.Cast<object>().OfType<string>().ToArray() : [];
 	}
 }

@@ -45,7 +45,7 @@ internal class FlyingScoreEffectPatch : IAffinity
 			__instance._registeredToCallbacks = true;
 		}
 
-		if (!playerMovementFollower.HasPlayerTrack)
+		if (!playerMovementFollower.ShouldFollowEffects)
 		{
 			if (config.FixedPosition != null)
 			{
@@ -84,9 +84,20 @@ internal class FlyingScoreEffectPatch : IAffinity
 		__instance.transform.SetParent(null, true);
 		__instance.transform.position = spawnPosition;
 		__instance.InitAndPresent(duration, targetPos, cutScoreBuffer.noteCutInfo.worldRotation, false);
-		playerMovementFollower.Attach(__instance, targetPos, cutScoreBuffer.noteCutInfo.worldRotation);
+		playerMovementFollower.Attach(__instance, targetPos, cutScoreBuffer.noteCutInfo.worldRotation,
+			config.FixedPosition != null);
 
 		return false;
+	}
+
+	[AffinityPrefix]
+	[AffinityPatch(typeof(FlyingScoreSpawner), nameof(FlyingScoreSpawner.HandleFlyingObjectEffectDidFinish))]
+	private void ReturnToPool(FlyingObjectEffect flyingObjectEffect)
+	{
+		if (playerMovementFollower.ShouldFollowEffects)
+		{
+			flyingObjectEffect.transform.SetParent(null, true);
+		}
 	}
 
 	[AffinityPrefix]

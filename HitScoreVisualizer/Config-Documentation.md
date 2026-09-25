@@ -24,7 +24,7 @@ If the version number (excluding patch version) of the config is higher than tha
 - If set to "directions", displays judgement text and off-direction arrow.
 
 ### "fixedPosition"
-If not null, judgments will appear and stay at this position. On maps that move the player with a Noodle player track, the position is relative to the player's origin and follows it. This takes priority over TargetPositionOffset. Additionally, the previous judgment will disappear when a new one is created (so there won't be overlap)
+If not null, judgments will appear and stay at this position. On maps that move the player with a Noodle player track or rotate the note lane, the position follows that movement relative to the player's origin. This takes priority over TargetPositionOffset. Additionally, the previous judgment will disappear when a new one is created (so there won't be overlap)
 
 ### "targetPositionOffset"
 Will offset the target position of the hitscore fade animation. If a fixed position is defined in the config, that one will take priority over this one and this will be fully ignored

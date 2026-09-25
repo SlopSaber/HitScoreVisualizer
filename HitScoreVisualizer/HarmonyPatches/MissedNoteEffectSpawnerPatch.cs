@@ -65,7 +65,7 @@ internal class MissedNoteEffectSpawnerPatch : IAffinity
 
 	private void SpawnText(MissDisplay display, NoteController noteController, float spawnPosZ)
 	{
-		if (!playerMovementFollower.HasPlayerTrack)
+		if (!playerMovementFollower.ShouldFollowEffects)
 		{
 			var originalPosition = noteController.inverseWorldRotation * noteController.noteTransform.position;
 			originalPosition.z = spawnPosZ;
