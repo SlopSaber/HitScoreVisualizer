@@ -7,5 +7,6 @@
 /ProjectSettings/*
 !/ProjectSettings/ProjectVersion.txt
 /Packages/packages-lock.json
+/Assets/Shaders/HsvTextOverlay.mat
 *.csproj
 *.sln

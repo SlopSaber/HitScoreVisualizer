@@ -56,11 +56,22 @@ internal static class HitTextOverlay
 		using var memory = new MemoryStream();
 		stream.CopyTo(memory);
 		overlayBundle = AssetBundle.LoadFromMemory(memory.ToArray());
-		var shaders = overlayBundle?.LoadAllAssets<Shader>();
-		overlayShader = shaders is { Length: > 0 } ? shaders[0] : null;
-		if (overlayShader == null || !overlayShader.isSupported)
+		if (overlayBundle == null)
 		{
-			Plugin.Log.Error("HSV no-bloom overlay shader could not be loaded.");
+			Plugin.Log.Error("HSV no-bloom overlay shader bundle could not be opened.");
+			return null;
+		}
+
+		var shaders = overlayBundle.LoadAllAssets<Shader>();
+		overlayShader = shaders is { Length: > 0 } ? shaders[0] : null;
+		if (overlayShader == null)
+		{
+			Plugin.Log.Error("HSV no-bloom overlay shader is missing from the bundle.");
+			return null;
+		}
+		if (!overlayShader.isSupported)
+		{
+			Plugin.Log.Error("HSV no-bloom overlay shader is unsupported by this renderer.");
 			return null;
 		}
 
