@@ -1,5 +1,6 @@
 using HitScoreVisualizer.Components;
 using HitScoreVisualizer.Models;
+using HitScoreVisualizer.Utilities;
 using HitScoreVisualizer.Utilities.Extensions;
 using SiraUtil.Affinity;
 using UnityEngine;
@@ -32,6 +33,7 @@ internal class FlyingScoreEffectPatch : IAffinity
 		};
 
 		var (text, color) = config.Judge(in judgmentDetails);
+		HitTextOverlay.Configure(__instance._text);
 		__instance._text.text = text;
 		__instance._color = color;
 		__instance._cutScoreBuffer = cutScoreBuffer;

@@ -1,4 +1,5 @@
 using HitScoreVisualizer.Models;
+using HitScoreVisualizer.Utilities;
 using TMPro;
 using UnityEngine;
 using Zenject;
@@ -29,6 +30,7 @@ internal class HsvFlyingEffect : FlyingObjectEffect
 			return;
 		}
 
+		HitTextOverlay.Configure(textMesh);
 		this.color = color;
 		textMesh.text = text;
 		textMesh.fontSize = fontSize;
