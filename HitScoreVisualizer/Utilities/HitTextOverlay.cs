@@ -27,7 +27,8 @@ internal static class HitTextOverlay
 
 		material.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);
 		material.SetInt("_ZTestMode", (int)CompareFunction.Always);
-		material.renderQueue = 5000;
-		text.renderer.sortingOrder = short.MaxValue;
+		material.renderQueue = 4999;
+		text.renderer.sortingLayerID = 0;
+		text.renderer.sortingOrder = short.MaxValue - 1;
 	}
 }
