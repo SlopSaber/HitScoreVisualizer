@@ -27,6 +27,9 @@ internal static class HitTextOverlay
 
 		material.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);
 		material.SetInt("_ZTestMode", (int)CompareFunction.Always);
+		material.SetInt("_Stencil", 128);
+		material.SetInt("_StencilComp", (int)CompareFunction.NotEqual);
+		material.SetInt("_StencilReadMask", 128);
 		material.renderQueue = 4999;
 		text.renderer.sortingLayerID = 0;
 		text.renderer.sortingOrder = short.MaxValue - 1;

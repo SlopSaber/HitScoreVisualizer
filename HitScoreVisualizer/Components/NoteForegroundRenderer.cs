@@ -1,18 +1,18 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Zenject;
 
 namespace HitScoreVisualizer.Components;
 
 internal sealed class NoteForegroundRenderer : IInitializable, IDisposable
 {
-	private sealed record OriginalRendererState(Material[] Materials, Material[] OverlayMaterials,
-		int SortingLayer, int SortingOrder);
-
+	private const int NoteStencilBit = 128;
 	private readonly BeatmapObjectManager beatmapObjectManager;
-	private readonly Dictionary<Renderer, OriginalRendererState> renderers = new();
-	private readonly List<Material> ownedMaterials = new();
+	private readonly HashSet<Renderer> noteRenderers = new();
+	private Material? stencilMaterial;
+	private bool loggedFirstNote;
 
 	public NoteForegroundRenderer(BeatmapObjectManager beatmapObjectManager)
 	{
@@ -21,11 +21,32 @@ internal sealed class NoteForegroundRenderer : IInitializable, IDisposable
 
 	public void Initialize()
 	{
+		var shader = Shader.Find("UI/Default");
+		if (shader == null || !shader.isSupported)
+		{
+			Plugin.Log.Warn("UI/Default is unavailable; HSV note occlusion is disabled.");
+			return;
+		}
+
+		stencilMaterial = new Material(shader) { name = "HSV Note Stencil", renderQueue = 4900 };
+		stencilMaterial.SetInt("_Stencil", NoteStencilBit);
+		stencilMaterial.SetInt("_StencilComp", (int)CompareFunction.Always);
+		stencilMaterial.SetInt("_StencilOp", (int)StencilOp.Replace);
+		stencilMaterial.SetInt("_StencilReadMask", NoteStencilBit);
+		stencilMaterial.SetInt("_StencilWriteMask", NoteStencilBit);
+		stencilMaterial.SetInt("_ColorMask", 0);
+		stencilMaterial.SetInt("unity_GUIZTestMode", (int)CompareFunction.LessEqual);
 		beatmapObjectManager.noteWasSpawnedEvent += NoteWasSpawned;
 	}
 
 	private void NoteWasSpawned(NoteController noteController)
 	{
+		if (stencilMaterial == null)
+		{
+			return;
+		}
+
+		int maskedRenderers = 0;
 		foreach (var renderer in noteController.GetComponentsInChildren<Renderer>(true))
 		{
 			if (renderer is not MeshRenderer and not SkinnedMeshRenderer)
@@ -33,78 +54,49 @@ internal sealed class NoteForegroundRenderer : IInitializable, IDisposable
 				continue;
 			}
 
-			renderers.TryGetValue(renderer, out var previous);
-			if (previous != null)
+			var materials = renderer.sharedMaterials;
+			if (materials.Length == 0 || materials[^1] == stencilMaterial ||
+				!Array.Exists(materials, material => material != null && material.renderQueue <= 2500))
 			{
-				if (UsesMaterials(renderer, previous.OverlayMaterials))
-				{
-					continue;
-				}
+				continue;
 			}
 
-			var originals = renderer.sharedMaterials;
-			var overlays = new Material[originals.Length];
-			for (int i = 0; i < originals.Length; i++)
-			{
-				if (originals[i] != null)
-				{
-					overlays[i] = new Material(originals[i]) { renderQueue = 5000 };
-					ownedMaterials.Add(overlays[i]);
-				}
-			}
+			Array.Resize(ref materials, materials.Length + 1);
+			materials[^1] = stencilMaterial;
+			renderer.sharedMaterials = materials;
+			noteRenderers.Add(renderer);
+			maskedRenderers++;
+		}
 
-			renderers[renderer] = new OriginalRendererState(originals, overlays,
-				previous?.SortingLayer ?? renderer.sortingLayerID,
-				previous?.SortingOrder ?? renderer.sortingOrder);
-			renderer.sharedMaterials = overlays;
-			renderer.sortingLayerID = 0;
-			renderer.sortingOrder = short.MaxValue;
+		if (!loggedFirstNote)
+		{
+			Plugin.Log.Info($"HSV note stencil: {maskedRenderers} opaque renderers on first {noteController.GetType().Name}");
+			loggedFirstNote = true;
 		}
 	}
 
 	public void Dispose()
 	{
 		beatmapObjectManager.noteWasSpawnedEvent -= NoteWasSpawned;
-		foreach (var (renderer, state) in renderers)
+		foreach (var renderer in noteRenderers)
 		{
-			if (renderer != null && UsesMaterials(renderer, state.OverlayMaterials))
+			if (renderer == null)
 			{
-				renderer.sharedMaterials = state.Materials;
-				renderer.sortingLayerID = state.SortingLayer;
-				renderer.sortingOrder = state.SortingOrder;
+				continue;
 			}
 
-		}
-
-		foreach (var material in ownedMaterials)
-		{
-			if (material != null)
+			var materials = renderer.sharedMaterials;
+			if (materials.Length > 0 && materials[^1] == stencilMaterial)
 			{
-				UnityEngine.Object.Destroy(material);
+				Array.Resize(ref materials, materials.Length - 1);
+				renderer.sharedMaterials = materials;
 			}
 		}
 
-		ownedMaterials.Clear();
-		renderers.Clear();
+		noteRenderers.Clear();
+		if (stencilMaterial != null)
+		{
+			UnityEngine.Object.Destroy(stencilMaterial);
+		}
 	}
-
-	private static bool UsesMaterials(Renderer renderer, Material[] materials)
-	{
-		var current = renderer.sharedMaterials;
-		if (current.Length != materials.Length)
-		{
-			return false;
-		}
-
-		for (int i = 0; i < current.Length; i++)
-		{
-			if (current[i] != materials[i])
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
-
 }
