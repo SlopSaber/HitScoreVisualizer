@@ -1,3 +1,4 @@
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -6,27 +7,41 @@ namespace HitScoreVisualizer.Utilities;
 
 internal static class HitTextOverlay
 {
+	private const string OverlayShaderName = "TextMeshPro/Distance Field Overlay";
+	private static Shader? overlayShader;
+	private static bool missingShaderLogged;
+	private static bool shaderChoiceLogged;
+
 	public static void Configure(TextMeshPro text)
 	{
 		// fontMaterial gives this text its own material, leaving menu previews and other mods alone.
 		var material = text.fontMaterial;
-		var overlayName = material.shader.name switch
+		var shader = overlayShader;
+		if (shader == null)
 		{
-			"TextMeshPro/Distance Field" => "TextMeshPro/Distance Field Overlay",
-			"TextMeshPro/Mobile/Distance Field" => "TextMeshPro/Mobile/Distance Field Overlay",
-			_ => null,
-		};
-		if (overlayName != null)
-		{
-			var overlayShader = Shader.Find(overlayName);
-			if (overlayShader != null && overlayShader.isSupported)
+			shader = Shader.Find(OverlayShaderName) ?? Resources.FindObjectsOfTypeAll<Shader>()
+				.FirstOrDefault(candidate => candidate.name == OverlayShaderName);
+			if (shader == null || !shader.isSupported)
 			{
-				material.shader = overlayShader;
+				if (!missingShaderLogged)
+				{
+					Plugin.Log.Warn("TMP overlay shader is unavailable; scenery can still occlude HSV text.");
+					missingShaderLogged = true;
+				}
+
+				return;
 			}
+
+			overlayShader = shader;
 		}
 
-		material.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);
-		material.SetInt("_ZTestMode", (int)CompareFunction.Always);
+		if (!shaderChoiceLogged)
+		{
+			Plugin.Log.Info($"HSV text shader: {material.shader.name} -> {shader.name}");
+			shaderChoiceLogged = true;
+		}
+
+		material.shader = shader;
 		material.SetInt("_Stencil", 128);
 		material.SetInt("_StencilComp", (int)CompareFunction.NotEqual);
 		material.SetInt("_StencilReadMask", 128);
