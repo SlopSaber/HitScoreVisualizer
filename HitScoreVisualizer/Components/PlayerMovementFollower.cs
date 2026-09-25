@@ -8,23 +8,27 @@ using Zenject;
 
 namespace HitScoreVisualizer.Components;
 
-internal class PlayerMovementFollower : ILateTickable, IDisposable
+internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposable
 {
 	private readonly record struct LaneSample(float Time, Quaternion Rotation, string[] Tracks);
 
 	private readonly PlayerTransforms playerTransforms;
+	private readonly BeatmapObjectManager beatmapObjectManager;
 	private readonly AudioTimeSyncController audioTimeSyncController;
 	private readonly List<LaneSample> laneSamples = new();
+	private readonly Dictionary<NoteData, Transform> cutParents = new();
 	private readonly IDictionary? heckTracks;
 	private readonly MethodInfo? getTrackProperty;
 	private readonly bool leftHanded;
 	private readonly bool hasLaneRotation;
 	private Transform? laneOrigin;
 
-	public PlayerMovementFollower(PlayerTransforms playerTransforms, AudioTimeSyncController audioTimeSyncController,
+	public PlayerMovementFollower(PlayerTransforms playerTransforms, BeatmapObjectManager beatmapObjectManager,
+		AudioTimeSyncController audioTimeSyncController,
 		IReadonlyBeatmapData beatmapData, GameplayCoreSceneSetupData sceneData, DiContainer container)
 	{
 		this.playerTransforms = playerTransforms;
+		this.beatmapObjectManager = beatmapObjectManager;
 		this.audioTimeSyncController = audioTimeSyncController;
 		leftHanded = sceneData.playerSpecificSettings.leftHanded;
 
@@ -106,6 +110,36 @@ internal class PlayerMovementFollower : ILateTickable, IDisposable
 	public bool ShouldFollowEffects => HasPlayerTrack || hasLaneRotation;
 	public Vector3 PlayerOriginPosition => PlayerOrigin?.position ?? Vector3.zero;
 	public Vector3 PlayerPointToWorld(Vector3 position) => LaneOrigin?.TransformPoint(position) ?? position;
+	public Transform? ParentForCut(NoteData noteData)
+	{
+		if (!cutParents.TryGetValue(noteData, out var parent))
+		{
+			return null;
+		}
+
+		cutParents.Remove(noteData);
+		return parent != null ? parent : null;
+	}
+
+	public static Transform? MapParent(NoteController noteController)
+	{
+		var parent = noteController.transform.parent;
+		return parent != null && parent.name == "ParentObject" ? parent : null;
+	}
+
+	public void Initialize()
+	{
+		beatmapObjectManager.noteWasCutEvent += NoteWasCut;
+	}
+
+	private void NoteWasCut(NoteController noteController, in NoteCutInfo noteCutInfo)
+	{
+		var parent = MapParent(noteController);
+		if (parent != null)
+		{
+			cutParents[noteCutInfo.noteData] = parent;
+		}
+	}
 
 	public void LateTick()
 	{
@@ -117,21 +151,32 @@ internal class PlayerMovementFollower : ILateTickable, IDisposable
 
 	public void Dispose()
 	{
+		beatmapObjectManager.noteWasCutEvent -= NoteWasCut;
 		if (laneOrigin != null)
 		{
 			UnityEngine.Object.Destroy(laneOrigin.gameObject);
 		}
 	}
 
-	public void Attach(FlyingObjectEffect effect, Vector3 targetPosition, Quaternion worldRotation, bool fixedPosition = false)
+	public void Attach(FlyingObjectEffect effect, Vector3 targetPosition, Quaternion worldRotation,
+		bool fixedPosition = false, Transform? mapParent = null)
 	{
-		var origin = LaneOrigin;
+		var origin = mapParent != null && !fixedPosition ? mapParent : LaneOrigin;
 		if (origin == null)
 		{
 			return;
 		}
 
-		if (hasLaneRotation)
+		if (mapParent != null && !fixedPosition)
+		{
+			var playerOrigin = PlayerOrigin;
+			targetPosition = mapParent.TransformPoint(playerOrigin != null
+				? playerOrigin.InverseTransformPoint(targetPosition)
+				: targetPosition);
+			worldRotation = mapParent.rotation *
+				(playerOrigin != null ? Quaternion.Inverse(playerOrigin.rotation) : Quaternion.identity) * worldRotation;
+		}
+		else if (hasLaneRotation)
 		{
 			var laneRotation = CurrentLaneRotation();
 			if (!fixedPosition)

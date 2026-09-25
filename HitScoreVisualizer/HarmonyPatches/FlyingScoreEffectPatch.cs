@@ -85,7 +85,7 @@ internal class FlyingScoreEffectPatch : IAffinity
 		__instance.transform.position = spawnPosition;
 		__instance.InitAndPresent(duration, targetPos, cutScoreBuffer.noteCutInfo.worldRotation, false);
 		playerMovementFollower.Attach(__instance, targetPos, cutScoreBuffer.noteCutInfo.worldRotation,
-			config.FixedPosition != null);
+			config.FixedPosition != null, playerMovementFollower.ParentForCut(cutScoreBuffer.noteCutInfo.noteData));
 
 		return false;
 	}

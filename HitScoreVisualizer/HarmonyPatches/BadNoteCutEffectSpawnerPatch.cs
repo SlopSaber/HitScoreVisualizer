@@ -82,6 +82,7 @@ internal class BadNoteCutEffectSpawnerPatch : IAffinity
 			noteController.worldRotation,
 			noteController.inverseWorldRotation,
 			display.Text,
-			display.Color);
+			display.Color,
+			PlayerMovementFollower.MapParent(noteController));
 	}
 }

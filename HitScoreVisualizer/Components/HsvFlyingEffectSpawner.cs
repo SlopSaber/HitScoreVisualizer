@@ -31,7 +31,8 @@ internal class HsvFlyingEffectSpawner : MonoBehaviour, IFlyingObjectEffectDidFin
 		playerMovementFollower = movementFollower;
 	}
 
-	public void SpawnText(Vector3 pos, Quaternion rotation, Quaternion inverseRotation, string text, Color? color)
+	public void SpawnText(Vector3 pos, Quaternion rotation, Quaternion inverseRotation, string text, Color? color,
+		Transform? mapParent = null)
 	{
 		var missTextEffect = missTextEffectPool.Spawn();
 		missTextEffect.didFinishEvent.Add(this);
@@ -47,10 +48,11 @@ internal class HsvFlyingEffectSpawner : MonoBehaviour, IFlyingObjectEffectDidFin
 		missTextEffect.transform.position = pos;
 
 		var originPosition = playerMovementFollower.PlayerOriginPosition;
-		var targetPos = originPosition + rotation * new Vector3(Mathf.Sign((inverseRotation * (pos - originPosition)).x) * xSpread, targetYPos, targetZPos);
+		var sidePosition = mapParent != null ? mapParent.InverseTransformPoint(pos) : pos - originPosition;
+		var targetPos = originPosition + rotation * new Vector3(Mathf.Sign((inverseRotation * sidePosition).x) * xSpread, targetYPos, targetZPos);
 
 		missTextEffect.InitAndPresent(text, duration, targetPos, rotation, color ?? this.color, fontSize, false);
-		playerMovementFollower.Attach(missTextEffect, targetPos, rotation);
+		playerMovementFollower.Attach(missTextEffect, targetPos, rotation, mapParent: mapParent);
 	}
 
 	public void HandleFlyingObjectEffectDidFinish(FlyingObjectEffect flyingObjectEffect)
