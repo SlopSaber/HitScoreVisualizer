@@ -61,10 +61,25 @@ internal class FlyingScoreEffectPatch : IAffinity
 			return false;
 		}
 
+		var mapParent = config.FixedPosition == null
+			? playerMovementFollower.ParentForCut(cutScoreBuffer.noteCutInfo.noteData)
+			: null;
 		if (config.FixedPosition != null)
 		{
 			// Set current and target position to the desired fixed position
 			targetPos = playerMovementFollower.PlayerPointToWorld(config.FixedPosition.Value);
+		}
+		else if (mapParent != null)
+		{
+			var rotation = cutScoreBuffer.noteCutInfo.worldRotation;
+			var inverseRotation = cutScoreBuffer.noteCutInfo.inverseWorldRotation;
+			var targetOffset = inverseRotation * targetPos;
+			targetOffset.x = (inverseRotation * mapParent.InverseTransformPoint(cutScoreBuffer.noteCutInfo.cutPoint)).x;
+			targetPos = mapParent.TransformPoint(rotation * targetOffset);
+			if (config.TargetPositionOffset != null)
+			{
+				targetPos += config.TargetPositionOffset.Value;
+			}
 		}
 		else
 		{
@@ -85,7 +100,7 @@ internal class FlyingScoreEffectPatch : IAffinity
 		__instance.transform.position = spawnPosition;
 		__instance.InitAndPresent(duration, targetPos, cutScoreBuffer.noteCutInfo.worldRotation, false);
 		playerMovementFollower.Attach(__instance, targetPos, cutScoreBuffer.noteCutInfo.worldRotation,
-			config.FixedPosition != null, playerMovementFollower.ParentForCut(cutScoreBuffer.noteCutInfo.noteData));
+			config.FixedPosition != null, mapParent);
 
 		return false;
 	}

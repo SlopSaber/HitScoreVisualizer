@@ -169,12 +169,7 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 
 		if (mapParent != null && !fixedPosition)
 		{
-			var playerOrigin = PlayerOrigin;
-			targetPosition = mapParent.TransformPoint(playerOrigin != null
-				? playerOrigin.InverseTransformPoint(targetPosition)
-				: targetPosition);
-			worldRotation = mapParent.rotation *
-				(playerOrigin != null ? Quaternion.Inverse(playerOrigin.rotation) : Quaternion.identity) * worldRotation;
+			worldRotation = mapParent.rotation * worldRotation;
 		}
 		else if (hasLaneRotation)
 		{

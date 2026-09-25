@@ -49,7 +49,10 @@ internal class HsvFlyingEffectSpawner : MonoBehaviour, IFlyingObjectEffectDidFin
 
 		var originPosition = playerMovementFollower.PlayerOriginPosition;
 		var sidePosition = mapParent != null ? mapParent.InverseTransformPoint(pos) : pos - originPosition;
-		var targetPos = originPosition + rotation * new Vector3(Mathf.Sign((inverseRotation * sidePosition).x) * xSpread, targetYPos, targetZPos);
+		var targetOffset = rotation * new Vector3(Mathf.Sign((inverseRotation * sidePosition).x) * xSpread, targetYPos, targetZPos);
+		var targetPos = mapParent != null
+			? mapParent.TransformPoint(targetOffset)
+			: originPosition + targetOffset;
 
 		missTextEffect.InitAndPresent(text, duration, targetPos, rotation, color ?? this.color, fontSize, false);
 		playerMovementFollower.Attach(missTextEffect, targetPos, rotation, mapParent: mapParent);
