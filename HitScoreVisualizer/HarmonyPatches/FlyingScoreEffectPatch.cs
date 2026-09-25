@@ -45,6 +45,22 @@ internal class FlyingScoreEffectPatch : IAffinity
 			__instance._registeredToCallbacks = true;
 		}
 
+		if (!playerMovementFollower.HasPlayerTrack)
+		{
+			if (config.FixedPosition != null)
+			{
+				targetPos = config.FixedPosition.Value;
+				__instance.transform.position = targetPos;
+			}
+			else if (config.TargetPositionOffset != null)
+			{
+				targetPos += config.TargetPositionOffset.Value;
+			}
+
+			__instance.InitAndPresent(duration, targetPos, cutScoreBuffer.noteCutInfo.worldRotation, false);
+			return false;
+		}
+
 		if (config.FixedPosition != null)
 		{
 			// Set current and target position to the desired fixed position

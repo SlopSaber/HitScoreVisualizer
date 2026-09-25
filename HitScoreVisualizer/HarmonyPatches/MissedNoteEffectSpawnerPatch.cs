@@ -65,6 +65,19 @@ internal class MissedNoteEffectSpawnerPatch : IAffinity
 
 	private void SpawnText(MissDisplay display, NoteController noteController, float spawnPosZ)
 	{
+		if (!playerMovementFollower.HasPlayerTrack)
+		{
+			var originalPosition = noteController.inverseWorldRotation * noteController.noteTransform.position;
+			originalPosition.z = spawnPosZ;
+			flyingEffectSpawner.SpawnText(
+				noteController.worldRotation * originalPosition,
+				noteController.worldRotation,
+				noteController.inverseWorldRotation,
+				display.Text,
+				display.Color);
+			return;
+		}
+
 		var originPosition = playerMovementFollower.PlayerOriginPosition;
 		var position = noteController.inverseWorldRotation * (noteController.noteTransform.position - originPosition);
 		position.z = spawnPosZ;

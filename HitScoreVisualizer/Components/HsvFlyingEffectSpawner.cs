@@ -35,6 +35,14 @@ internal class HsvFlyingEffectSpawner : MonoBehaviour, IFlyingObjectEffectDidFin
 	{
 		var missTextEffect = missTextEffectPool.Spawn();
 		missTextEffect.didFinishEvent.Add(this);
+		if (!playerMovementFollower.HasPlayerTrack)
+		{
+			missTextEffect.transform.localPosition = pos;
+			var originalTargetPos = rotation * new Vector3(Mathf.Sign((inverseRotation * pos).x) * xSpread, targetYPos, targetZPos);
+			missTextEffect.InitAndPresent(text, duration, originalTargetPos, rotation, color ?? this.color, fontSize, false);
+			return;
+		}
+
 		missTextEffect.transform.SetParent(null, true);
 		missTextEffect.transform.position = pos;
 
