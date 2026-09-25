@@ -24,6 +24,7 @@ internal class HsvPlayerInstaller : Installer
 		}
 
 		Container.BindInstance(currentConfig).AsSingle();
+		Container.Bind<PlayerMovementFollower>().AsSingle();
 
 		Container.Bind<HsvFlyingEffectSpawner>().FromNewComponentOnNewGameObject().AsSingle();
 		Container.BindMemoryPool<HsvFlyingEffect, HsvFlyingEffect.Pool>()

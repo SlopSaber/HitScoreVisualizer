@@ -1,3 +1,4 @@
+using HitScoreVisualizer.Components;
 using HitScoreVisualizer.Models;
 using HitScoreVisualizer.Utilities.Extensions;
 using SiraUtil.Affinity;
@@ -8,10 +9,12 @@ namespace HitScoreVisualizer.HarmonyPatches;
 internal class FlyingScoreEffectPatch : IAffinity
 {
 	private readonly HsvConfigModel config;
+	private readonly PlayerMovementFollower playerMovementFollower;
 
-	private FlyingScoreEffectPatch(HsvConfigModel config)
+	private FlyingScoreEffectPatch(HsvConfigModel config, PlayerMovementFollower playerMovementFollower)
 	{
 		this.config = config;
+		this.playerMovementFollower = playerMovementFollower;
 	}
 
 	// When the flying score effect spawns, InitAndPresent is called
@@ -45,15 +48,27 @@ internal class FlyingScoreEffectPatch : IAffinity
 		if (config.FixedPosition != null)
 		{
 			// Set current and target position to the desired fixed position
-			targetPos = config.FixedPosition.Value;
-			__instance.transform.position = targetPos;
+			targetPos = playerMovementFollower.PlayerPointToWorld(config.FixedPosition.Value);
 		}
-		else if (config.TargetPositionOffset != null)
+		else
 		{
-			targetPos += config.TargetPositionOffset.Value;
+			var rotation = cutScoreBuffer.noteCutInfo.worldRotation;
+			var inverseRotation = cutScoreBuffer.noteCutInfo.inverseWorldRotation;
+			var originPosition = playerMovementFollower.PlayerOriginPosition;
+			var targetOffset = inverseRotation * targetPos;
+			targetOffset.x = (inverseRotation * (cutScoreBuffer.noteCutInfo.cutPoint - originPosition)).x;
+			targetPos = originPosition + rotation * targetOffset;
+			if (config.TargetPositionOffset != null)
+			{
+				targetPos += config.TargetPositionOffset.Value;
+			}
 		}
 
+		var spawnPosition = config.FixedPosition != null ? targetPos : __instance.transform.localPosition;
+		__instance.transform.SetParent(null, true);
+		__instance.transform.position = spawnPosition;
 		__instance.InitAndPresent(duration, targetPos, cutScoreBuffer.noteCutInfo.worldRotation, false);
+		playerMovementFollower.Attach(__instance, targetPos, cutScoreBuffer.noteCutInfo.worldRotation);
 
 		return false;
 	}

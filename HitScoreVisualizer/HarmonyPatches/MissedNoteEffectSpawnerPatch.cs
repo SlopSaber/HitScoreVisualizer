@@ -11,14 +11,16 @@ internal class MissedNoteEffectSpawnerPatch : IAffinity
 {
 	private readonly HsvFlyingEffectSpawner flyingEffectSpawner;
 	private readonly HsvConfigModel config;
+	private readonly PlayerMovementFollower playerMovementFollower;
 	private readonly Random random = new();
 
 	private readonly ArrayPicker<MissDisplay> missPicker = new([]);
 
-	public MissedNoteEffectSpawnerPatch(HsvFlyingEffectSpawner flyingEffectSpawner, HsvConfigModel config)
+	public MissedNoteEffectSpawnerPatch(HsvFlyingEffectSpawner flyingEffectSpawner, HsvConfigModel config, PlayerMovementFollower playerMovementFollower)
 	{
 		this.flyingEffectSpawner = flyingEffectSpawner;
 		this.config = config;
+		this.playerMovementFollower = playerMovementFollower;
 
 		if (config.MissDisplays is null)
 		{
@@ -63,11 +65,12 @@ internal class MissedNoteEffectSpawnerPatch : IAffinity
 
 	private void SpawnText(MissDisplay display, NoteController noteController, float spawnPosZ)
 	{
-		var position = noteController.inverseWorldRotation * noteController.noteTransform.position;
+		var originPosition = playerMovementFollower.PlayerOriginPosition;
+		var position = noteController.inverseWorldRotation * (noteController.noteTransform.position - originPosition);
 		position.z = spawnPosZ;
 
 		flyingEffectSpawner.SpawnText(
-			noteController.worldRotation * position,
+			originPosition + noteController.worldRotation * position,
 			noteController.worldRotation,
 			noteController.inverseWorldRotation,
 			display.Text,
