@@ -53,12 +53,21 @@ internal class BloomFontProvider : IDisposable
 	{
 		if (cachedTekoFont.IsValueCreated && cachedTekoFont.Value != null)
 		{
-			Object.Destroy(cachedTekoFont.Value);
+			ReleaseFont(cachedTekoFont.Value);
 		}
 
 		if (bloomTekoFont.IsValueCreated && bloomTekoFont.Value != null)
 		{
-			Object.Destroy(bloomTekoFont.Value);
+			ReleaseFont(bloomTekoFont.Value);
 		}
+	}
+
+	private static void ReleaseFont(TMP_FontAsset font)
+	{
+		var material = font.material;
+		var atlasTexture = font.atlasTexture;
+		Object.Destroy(font);
+		if (material != null) Object.Destroy(material);
+		if (atlasTexture != null) Object.Destroy(atlasTexture);
 	}
 }

@@ -19,6 +19,7 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 	private readonly Dictionary<NoteData, Transform> cutParents = new();
 	private readonly IDictionary? heckTracks;
 	private readonly MethodInfo? getTrackProperty;
+	private readonly object?[] trackPropertyArguments = new object?[2];
 	private readonly bool leftHanded;
 	private readonly bool hasLaneRotation;
 	private Transform? laneOrigin;
@@ -48,6 +49,7 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 			return;
 		}
 
+		var customDataProperties = new Dictionary<Type, PropertyInfo?>();
 		foreach (var note in beatmapData.GetBeatmapDataItems<NoteData>(0).OrderBy(note => note.time))
 		{
 			if (note.gameplayType == NoteData.GameplayType.Bomb ||
@@ -56,7 +58,13 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 				continue;
 			}
 
-			var customData = note.GetType().GetProperty("customData")?.GetValue(note) as IDictionary<string, object>;
+			var noteType = note.GetType();
+			if (!customDataProperties.TryGetValue(noteType, out var customDataProperty))
+			{
+				customDataProperty = noteType.GetProperty("customData");
+				customDataProperties.Add(noteType, customDataProperty);
+			}
+			var customData = customDataProperty?.GetValue(note) as IDictionary<string, object>;
 			laneSamples.Add(new LaneSample(note.time, ReadRotation(customData), ReadTracks(customData)));
 		}
 
@@ -248,10 +256,12 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 			return rotation;
 		}
 
+		trackPropertyArguments[1] = "offsetWorldRotation";
 		foreach (var trackName in sample.Tracks)
 		{
-			if (heckTracks.Contains(trackName) &&
-			    getTrackProperty.Invoke(null, [heckTracks[trackName], "offsetWorldRotation"]) is Quaternion offset)
+			if (!heckTracks.Contains(trackName)) continue;
+			trackPropertyArguments[0] = heckTracks[trackName];
+			if (getTrackProperty.Invoke(null, trackPropertyArguments) is Quaternion offset)
 			{
 				rotation *= Mirror(offset);
 			}

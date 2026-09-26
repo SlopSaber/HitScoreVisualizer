@@ -22,6 +22,7 @@ internal class HsvFlyingEffect : FlyingObjectEffect
 	[SerializeField] public TextMeshPro? textMesh;
 
 	private Color color;
+	private bool overlayConfigured;
 
 	public void InitAndPresent(string text, float duration, Vector3 targetPos, Quaternion rotation, Color color, float fontSize, bool shake)
 	{
@@ -30,7 +31,11 @@ internal class HsvFlyingEffect : FlyingObjectEffect
 			return;
 		}
 
-		HitTextOverlay.Configure(textMesh);
+		if (!overlayConfigured)
+		{
+			HitTextOverlay.Configure(textMesh);
+			overlayConfigured = true;
+		}
 		this.color = color;
 		textMesh.text = text;
 		textMesh.fontSize = fontSize;
