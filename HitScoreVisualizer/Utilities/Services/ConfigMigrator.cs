@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using HitScoreVisualizer.Models;
 using HitScoreVisualizer.Models.ConfigMigrations;
 using HitScoreVisualizer.Utilities.Extensions;
@@ -56,7 +57,7 @@ internal class ConfigMigrator
 		}
 	}
 
-	public ConfigInfo MigrateConfig(ConfigInfo configInfo)
+	public async Task<ConfigInfo> MigrateConfig(ConfigInfo configInfo, Func<bool> isCurrent)
 	{
 		if (configInfo.Config is null)
 		{
@@ -66,8 +67,12 @@ internal class ConfigMigrator
 
 		// Create a backup file
 		var backupName = $"{configInfo.ConfigName} (backup of config made for {configInfo.Config.GetVersion()}{configInfo.File.Extension})";
-		var backupPath = FilePathUtils.GetUniqueFilePath(Path.Combine(directories.Backups.FullName, backupName));
-		configInfo.File.CopyTo(backupPath);
+		var backupPath = Path.Combine(directories.Backups.FullName, backupName);
+		await ConfigFileWorker.Backup(configInfo.File.FullName, backupPath);
+		if (!isCurrent())
+		{
+			return configInfo;
+		}
 
 		foreach (var migration in migrations.Where((m => m.Version >= configInfo.Config.GetVersion())))
 		{

@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -25,6 +24,10 @@ internal class ConfigSelectorViewController : BSMLAutomaticViewController
 
 	[UIComponent("configs-list")]
 	private readonly CustomCellListTableData configsList = null!;
+	private bool active;
+	private bool publishingSelection;
+	private long listRevision;
+	private long operationRevision;
 
 	public bool LoadingConfigs { get; private set; }
 
@@ -43,6 +46,10 @@ internal class ConfigSelectorViewController : BSMLAutomaticViewController
 
 	public void ConfigSelected(TableView tableView, object obj)
 	{
+		if (!publishingSelection)
+		{
+			RetirePendingOperations();
+		}
 		pluginConfig.SelectedConfig = (ConfigInfo)obj;
 		NotifyPropertyChanged(nameof(ConfigPickable));
 		NotifyPropertyChanged(nameof(ConfigYeetable));
@@ -52,6 +59,7 @@ internal class ConfigSelectorViewController : BSMLAutomaticViewController
 	{
 		try
 		{
+			RetirePendingOperations();
 			await RefreshListInternal();
 		}
 		catch (Exception ex)
@@ -64,7 +72,11 @@ internal class ConfigSelectorViewController : BSMLAutomaticViewController
 	{
 		try
 		{
-			if (await configLoader.TrySelectConfig(pluginConfig.SelectedConfig))
+			RetirePendingOperations();
+			var revision = operationRevision;
+			var selectedConfig = pluginConfig.SelectedConfig;
+			bool IsCurrent() => this && active && revision == operationRevision && ReferenceEquals(pluginConfig.SelectedConfig, selectedConfig);
+			if (await configLoader.TrySelectConfig(selectedConfig, IsCurrent) && IsCurrent())
 			{
 				await RefreshListInternal();
 			}
@@ -84,6 +96,7 @@ internal class ConfigSelectorViewController : BSMLAutomaticViewController
 				return;
 			}
 
+			RetirePendingOperations();
 			configsList.TableView.ClearSelection();
 			await configLoader.TrySelectConfig(null);
 
@@ -105,10 +118,23 @@ internal class ConfigSelectorViewController : BSMLAutomaticViewController
 				return;
 			}
 
-			pluginConfig.SelectedConfig?.Yeet();
+			var selectedConfig = pluginConfig.SelectedConfig;
+			RetirePendingOperations();
+			var revision = operationRevision;
+			if (selectedConfig is not null)
+			{
+				await selectedConfig.Yeet();
+			}
+			if (!this || !active || revision != operationRevision || !ReferenceEquals(pluginConfig.SelectedConfig, selectedConfig))
+			{
+				return;
+			}
 			await RefreshListInternal();
 
-			NotifyPropertyChanged(nameof(ConfigYeetable));
+			if (this && active && revision == operationRevision)
+			{
+				NotifyPropertyChanged(nameof(ConfigYeetable));
+			}
 		}
 		catch (Exception ex)
 		{
@@ -116,15 +142,24 @@ internal class ConfigSelectorViewController : BSMLAutomaticViewController
 		}
 	}
 
-	public void FolderButtonPressed()
+	public async void FolderButtonPressed()
 	{
-		Process.Start(directories.Configs.FullName);
+		try
+		{
+			await ConfigFileWorker.OpenFolder(directories.Configs.FullName);
+		}
+		catch (Exception ex)
+		{
+			Plugin.Log.Error($"Encountered a problem while opening the configuration folder: {ex}");
+		}
 	}
 
 	protected override async void DidActivate(bool firstActivation, bool addedToHierarchy, bool screenSystemEnabling)
 	{
 		try
 		{
+			active = true;
+			RetirePendingOperations(false);
 			base.DidActivate(firstActivation, addedToHierarchy, screenSystemEnabling);
 			await RefreshListInternal();
 		}
@@ -134,35 +169,88 @@ internal class ConfigSelectorViewController : BSMLAutomaticViewController
 		}
 	}
 
+	protected override void DidDeactivate(bool removedFromHierarchy, bool screenSystemDisabling)
+	{
+		active = false;
+		RetirePendingOperations(false);
+		base.DidDeactivate(removedFromHierarchy, screenSystemDisabling);
+	}
+
+	private void RetirePendingOperations(bool retireSelection = true)
+	{
+		listRevision++;
+		operationRevision++;
+		if (retireSelection)
+		{
+			configLoader.RetireSelection();
+		}
+		if (LoadingConfigs)
+		{
+			LoadingConfigs = false;
+			NotifyPropertyChanged(nameof(LoadingConfigs));
+			NotifyPropertyChanged(nameof(HasLoadedConfigs));
+		}
+	}
+
 	private async Task RefreshListInternal()
 	{
+		if (!this || !active)
+		{
+			return;
+		}
+		var revision = ++listRevision;
 		LoadingConfigs = true;
 
 		NotifyPropertyChanged(nameof(LoadingConfigs));
 		NotifyPropertyChanged(nameof(HasLoadedConfigs));
 
-		var intermediateConfigs = (await configLoader.LoadAllHsvConfigs())
-			.OrderByDescending(x => x.State)
-			.ThenBy(x => x.ConfigName)
-			.ToList();
-		var currentConfigIndex = intermediateConfigs.FindIndex(configInfo => configInfo.File.FullName == pluginConfig.SelectedConfig?.File.FullName);
-
-		configsList.Data = intermediateConfigs;
-
-		await UnityMainThreadTaskScheduler.Factory.StartNew(() =>
+		try
 		{
-			configsList.TableView.ReloadData();
-			configsList.TableView.ScrollToCellWithIdx(0, TableView.ScrollPositionType.Beginning, false);
-			if (currentConfigIndex >= 0)
+			var loadedConfigs = await configLoader.LoadAllHsvConfigs();
+			if (!this || !active || revision != listRevision)
 			{
-				configsList.TableView.SelectCellWithIdx(currentConfigIndex, true);
+				return;
 			}
 
-			LoadingConfigs = false;
-			NotifyPropertyChanged(nameof(LoadingConfigs));
-			NotifyPropertyChanged(nameof(HasLoadedConfigs));
-			NotifyPropertyChanged(nameof(HasConfigCurrently));
-			NotifyPropertyChanged(nameof(LoadedConfigText));
-		});
+			var intermediateConfigs = loadedConfigs.OrderByDescending(x => x.State).ThenBy(x => x.ConfigName).ToList();
+			var currentConfigIndex = intermediateConfigs.FindIndex(configInfo => configInfo.File.FullName == pluginConfig.SelectedConfig?.File.FullName);
+			await UnityMainThreadTaskScheduler.Factory.StartNew(() =>
+			{
+				if (!this || !active || revision != listRevision)
+				{
+					return;
+				}
+				configsList.Data = intermediateConfigs;
+				configsList.TableView.ReloadData();
+				if (!this || !active || revision != listRevision)
+				{
+					return;
+				}
+				configsList.TableView.ScrollToCellWithIdx(0, TableView.ScrollPositionType.Beginning, false);
+				if (currentConfigIndex >= 0)
+				{
+					publishingSelection = true;
+					try
+					{
+						configsList.TableView.SelectCellWithIdx(currentConfigIndex, true);
+					}
+					finally
+					{
+						publishingSelection = false;
+					}
+				}
+				NotifyPropertyChanged(nameof(HasConfigCurrently));
+				NotifyPropertyChanged(nameof(LoadedConfigText));
+			});
+		}
+		finally
+		{
+			if (this && active && revision == listRevision)
+			{
+				LoadingConfigs = false;
+				NotifyPropertyChanged(nameof(LoadingConfigs));
+				NotifyPropertyChanged(nameof(HasLoadedConfigs));
+			}
+		}
 	}
 }

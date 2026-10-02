@@ -18,7 +18,8 @@ public class ConfigLoader : IInitializable
 	private readonly ConfigMigrator configMigrator;
 	private readonly PluginDirectories directories;
 
-	private readonly string[] configFileTypes = ["json", "hsv", "hsvconfig"];
+	private Task? initializationTask;
+	private long selectionRevision;
 	private readonly JsonSerializerSettings configSerializerSettings = new()
 	{
 		DefaultValueHandling = DefaultValueHandling.Include,
@@ -41,8 +42,8 @@ public class ConfigLoader : IInitializable
 	{
 		try
 		{
-			await CreateDefaultConfig();
-			await LoadSelectedConfig();
+			initializationTask ??= InitializeInternal();
+			await initializationTask;
 		}
 		catch (Exception ex)
 		{
@@ -50,18 +51,43 @@ public class ConfigLoader : IInitializable
 		}
 	}
 
+	private async Task InitializeInternal()
+	{
+		var revision = selectionRevision;
+		await ConfigFileWorker.EnsureDirectories(directories.Configs.FullName, directories.Backups.FullName);
+		await CreateDefaultConfig();
+		if (revision == selectionRevision)
+		{
+			await LoadSelectedConfig(revision);
+		}
+	}
+
+	internal void RetireSelection()
+	{
+		selectionRevision++;
+	}
+
 	internal async Task<ConfigInfo[]> LoadAllHsvConfigs()
 	{
-		var createFileTasks = configFileTypes
-			.SelectMany(ft => directories.Configs.EnumerateFiles($"*.{ft}", SearchOption.AllDirectories))
+		var paths = await ConfigFileWorker.Catalog(directories.Configs.FullName, directories.Backups.FullName);
+		var createFileTasks = paths.Select(path => new FileInfo(path))
 			.Where(file => !file.FullName.StartsWith(directories.Backups.FullName))
 			.Select(GetConfigInfo);
 
 		return await Task.WhenAll(createFileTasks);
 	}
 
-	internal async Task<bool> TrySelectConfig(ConfigInfo? configInfo)
+	internal Task<bool> TrySelectConfig(ConfigInfo? configInfo) => TrySelectConfig(configInfo, null);
+
+	internal async Task<bool> TrySelectConfig(ConfigInfo? configInfo, Func<bool>? mayPublish)
 	{
+		if (mayPublish is not null && !mayPublish())
+		{
+			return false;
+		}
+		var revision = ++selectionRevision;
+		var originalConfig = configInfo?.Config;
+		bool IsCurrent() => revision == selectionRevision && ReferenceEquals(configInfo?.Config, originalConfig) && (mayPublish?.Invoke() ?? true);
 		if (configInfo is not { State: ConfigState.Compatible or ConfigState.NeedsMigration })
 		{
 			pluginConfig.SelectedConfig = null;
@@ -73,8 +99,16 @@ public class ConfigLoader : IInitializable
 		if (configInfo.State is ConfigState.NeedsMigration)
 		{
 			Plugin.Log.Warn("Selected a config that needs migration");
-			configInfo = configMigrator.MigrateConfig(configInfo);
+			configInfo = await configMigrator.MigrateConfig(configInfo, IsCurrent);
+			if (!IsCurrent())
+			{
+				return false;
+			}
 			await SaveConfig(configInfo);
+		}
+		if (!IsCurrent())
+		{
+			return false;
 		}
 
 		if (configInfo is { Config: not null, State: ConfigState.Compatible })
@@ -104,9 +138,15 @@ public class ConfigLoader : IInitializable
 	{
 		try
 		{
-			using var streamReader = file.OpenText();
-			var content = await streamReader.ReadToEndAsync();
-			return JsonConvert.DeserializeObject<HsvConfigModel>(content, configSerializerSettings);
+			var (token, content) = await ConfigFileWorker.BeginRead(file.FullName);
+			try
+			{
+				return JsonConvert.DeserializeObject<HsvConfigModel>(content, configSerializerSettings);
+			}
+			finally
+			{
+				await ConfigFileWorker.EndRead(token);
+			}
 		}
 		catch (Exception ex)
 		{
@@ -125,9 +165,18 @@ public class ConfigLoader : IInitializable
 			}
 
 			Plugin.Log.Info($"Saving config {config.ConfigName}");
-			await using var streamWriter = config.File.CreateText();
-			var content = JsonConvert.SerializeObject(config.Config, Formatting.Indented, configSerializerSettings);
-			await streamWriter.WriteAsync(content);
+			var token = await ConfigFileWorker.BeginSave(config.File.FullName);
+			string content;
+			try
+			{
+				content = JsonConvert.SerializeObject(config.Config, Formatting.Indented, configSerializerSettings);
+			}
+			catch
+			{
+				await ConfigFileWorker.AbortSave(token);
+				throw;
+			}
+			await ConfigFileWorker.CommitSave(token, content);
 		}
 		catch (Exception e)
 		{
@@ -140,7 +189,7 @@ public class ConfigLoader : IInitializable
 		const string defaultConfigName = "HitScoreVisualizerConfig (default).json";
 		var defaultConfigPath = Path.Combine(directories.Configs.FullName, defaultConfigName);
 		var defaultConfigFile = new FileInfo(defaultConfigPath);
-		if (!defaultConfigFile.Exists)
+		if (!await ConfigFileWorker.Exists(defaultConfigFile.FullName))
 		{
 			var defaultConfigDescription = ConfigState.Compatible.GetConfigDescription(Plugin.Metadata.HVersion);
 			await SaveConfig(new(defaultConfigFile, defaultConfigDescription, ConfigState.Compatible)
@@ -150,24 +199,27 @@ public class ConfigLoader : IInitializable
 		}
 
 		var legacyConfigPath = Path.Combine(UnityGame.UserDataPath, "HitScoreVisualizerConfig.json");
-		var legacyConfigFile = new FileInfo(legacyConfigPath);
-		if (legacyConfigFile.Exists)
-		{
-			var destinationHsvConfigPath = Path.Combine(directories.Configs.FullName, "HitScoreVisualizerConfig (imported).json");
-			legacyConfigFile.MoveTo(destinationHsvConfigPath);
-		}
+		var destinationHsvConfigPath = Path.Combine(directories.Configs.FullName, "HitScoreVisualizerConfig (imported).json");
+		await ConfigFileWorker.MoveIfExists(legacyConfigPath, destinationHsvConfigPath);
 	}
 
-	private async Task LoadSelectedConfig()
+	private async Task LoadSelectedConfig(long revision)
 	{
 		if (pluginConfig.ConfigFilePath == null)
 		{
 			return;
 		}
 
-		var fullPath = Path.Combine(directories.Configs.FullName, pluginConfig.ConfigFilePath);
+		var selectedPath = pluginConfig.ConfigFilePath;
+		var fullPath = Path.Combine(directories.Configs.FullName, selectedPath);
 		var fileInfo = new FileInfo(fullPath);
-		if (!fileInfo.Exists)
+		var exists = await ConfigFileWorker.Exists(fileInfo.FullName);
+		bool IsCurrent() => revision == selectionRevision && pluginConfig.ConfigFilePath == selectedPath;
+		if (!IsCurrent())
+		{
+			return;
+		}
+		if (!exists)
 		{
 			Plugin.Log.Warn("Selected config file was not found; resetting to default.");
 			pluginConfig.ConfigFilePath = null;
@@ -175,6 +227,10 @@ public class ConfigLoader : IInitializable
 		}
 
 		var selectedConfig = await GetConfigInfo(fileInfo);
+		if (!IsCurrent())
+		{
+			return;
+		}
 		if (selectedConfig.Config is null)
 		{
 			Plugin.Log.Warn("Problem encountered when trying to load selected config; resetting to default.");

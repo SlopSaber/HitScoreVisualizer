@@ -12,19 +12,10 @@ internal class PluginDirectories
 	{
 		var configsPath = Path.Combine(UnityGame.UserDataPath, nameof(HitScoreVisualizer));
 		configs = new(configsPath);
-		backups = Configs.CreateSubdirectory("Backups");
+		backups = new(Path.Combine(configs.FullName, "Backups"));
 	}
 
-	public DirectoryInfo Configs => CreateDirectoryIfNotExists(configs);
+	public DirectoryInfo Configs => configs;
 
-	public DirectoryInfo Backups => CreateDirectoryIfNotExists(backups);
-
-	private static DirectoryInfo CreateDirectoryIfNotExists(DirectoryInfo directory)
-	{
-		if (!directory.Exists)
-		{
-			directory.Create();
-		}
-		return directory;
-	}
+	public DirectoryInfo Backups => backups;
 }

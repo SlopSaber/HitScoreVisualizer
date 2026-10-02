@@ -1,4 +1,6 @@
+using System.Threading.Tasks;
 using HitScoreVisualizer.Models;
+using HitScoreVisualizer.Utilities.Services;
 using Hive.Versioning;
 
 namespace HitScoreVisualizer.Utilities.Extensions;
@@ -17,11 +19,8 @@ internal static class HsvConfigExtensions
 		return new(config.MajorVersion, config.MinorVersion, config.PatchVersion);
 	}
 
-	internal static void Yeet(this ConfigInfo configInfo)
+	internal static Task Yeet(this ConfigInfo configInfo)
 	{
-		if (configInfo.File.Exists)
-		{
-			configInfo.File.Delete();
-		}
+		return ConfigFileWorker.Delete(configInfo.File.FullName);
 	}
 }
