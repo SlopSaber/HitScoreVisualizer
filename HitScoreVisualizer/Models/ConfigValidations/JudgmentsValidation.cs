@@ -13,12 +13,14 @@ internal class JudgmentsValidation : IConfigValidation
 		this.propertyGetter = propertyGetter;
 	}
 
-	public bool IsValid(HsvConfigModel config)
+	public bool IsValid(HsvConfigModel config) => IsValid(config, message => Plugin.Log.Warn(message));
+
+	public bool IsValid(HsvConfigModel config, Action<string> warning)
 	{
 		var judgments = propertyGetter(config).ToList();
 		if (judgments is [])
 		{
-			Plugin.Log.Warn("Config contains no Judgments when it should specify at least one Judgment");
+			warning("Config contains no Judgments when it should specify at least one Judgment");
 			return false;
 		}
 
@@ -28,7 +30,7 @@ internal class JudgmentsValidation : IConfigValidation
 
 		if (!isOrdered)
 		{
-			Plugin.Log.Warn("Judgments are not correctly ordered; they should be ordered from highest to lowest threshold");
+			warning("Judgments are not correctly ordered; they should be ordered from highest to lowest threshold");
 			return false;
 		}
 
@@ -40,12 +42,12 @@ internal class JudgmentsValidation : IConfigValidation
 
 		if (!isHighestJudgmentValid)
 		{
-			Plugin.Log.Warn("The first judgment cannot have fade set to true");
+			warning("The first judgment cannot have fade set to true");
 		}
 
 		if (hasDuplicates)
 		{
-			Plugin.Log.Warn("Judgments contain a duplicate threshold");
+			warning("Judgments contain a duplicate threshold");
 		}
 
 		return isHighestJudgmentValid && !hasDuplicates;

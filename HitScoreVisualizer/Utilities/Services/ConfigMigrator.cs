@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.ExceptionServices;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -49,6 +50,36 @@ internal class ConfigMigrator
 				: configVersion < minimumMigratableVersion ? ConfigState.Incompatible
 				: configVersion < maximumMigrationNeededVersion ? ConfigState.NeedsMigration
 				: configuration.Validate() ? ConfigState.Compatible : ConfigState.ValidationFailed;
+		}
+		catch (Exception ex)
+		{
+			Plugin.Log.Error($"Encountered a problem when getting the state of {fileName}: \n{ex}");
+			return ConfigState.Broken;
+		}
+	}
+
+	public async Task<ConfigState> GetConfigStateAsync(HsvConfigModel? configuration, string fileName)
+	{
+		try
+		{
+			if (configuration is null)
+			{
+				return ConfigState.Broken;
+			}
+			if (!ConfigStatePreparation.TryCapture(configuration, Plugin.Metadata.HVersion, minimumMigratableVersion, maximumMigrationNeededVersion, out var request))
+			{
+				return GetConfigState(configuration, fileName);
+			}
+			var result = await ConfigFileWorker.PrepareState(request);
+			foreach (var warning in result.Warnings)
+			{
+				Plugin.Log.Warn(warning);
+			}
+			if (result.Error is not null)
+			{
+				ExceptionDispatchInfo.Capture(result.Error).Throw();
+			}
+			return result.State;
 		}
 		catch (Exception ex)
 		{

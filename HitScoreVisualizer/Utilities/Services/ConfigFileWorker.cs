@@ -11,7 +11,7 @@ namespace HitScoreVisualizer.Utilities.Services;
 
 internal static class ConfigFileWorker
 {
-	private enum Operation { EnsureDirectories, Catalog, Exists, BeginRead, PrepareRead, EndRead, MoveIfExists, Backup, Delete, OpenFolder, BeginSave, CommitSave, CommitConfig, AbortSave }
+	private enum Operation { EnsureDirectories, Catalog, Exists, BeginRead, PrepareRead, EndRead, MoveIfExists, Backup, Delete, OpenFolder, BeginSave, CommitSave, CommitConfig, AbortSave, PrepareState }
 
 	private sealed class Result
 	{
@@ -20,6 +20,7 @@ internal static class ConfigFileWorker
 		public bool Exists;
 		public long Token;
 		public HsvConfigModel? Config;
+		public ConfigStatePreparation.Result? State;
 	}
 
 	private sealed class Request
@@ -32,9 +33,10 @@ internal static class ConfigFileWorker
 		public readonly HsvConfigModel? Config;
 		public readonly CultureInfo? Culture;
 		public readonly ConfigJsonPreparation.VectorReadChannel? VectorReads;
+		public readonly ConfigStatePreparation.Request? State;
 		public readonly TaskCompletionSource<Result> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		public Request(Operation operation, string path, string? destination = null, string? text = null, long token = 0, HsvConfigModel? config = null, CultureInfo? culture = null, ConfigJsonPreparation.VectorReadChannel? vectorReads = null)
+		public Request(Operation operation, string path, string? destination = null, string? text = null, long token = 0, HsvConfigModel? config = null, CultureInfo? culture = null, ConfigJsonPreparation.VectorReadChannel? vectorReads = null, ConfigStatePreparation.Request? state = null)
 		{
 			Operation = operation;
 			Path = path;
@@ -44,6 +46,7 @@ internal static class ConfigFileWorker
 			Config = config;
 			Culture = culture;
 			VectorReads = vectorReads;
+			State = state;
 		}
 	}
 
@@ -83,6 +86,8 @@ internal static class ConfigFileWorker
 	public static Task CommitSave(long token, string text) => FinishSave(new(Operation.CommitSave, string.Empty, text: text, token: token));
 	public static Task CommitConfig(long token, HsvConfigModel? snapshot, CultureInfo culture) => FinishSave(new(Operation.CommitConfig, string.Empty, token: token, config: snapshot, culture: culture));
 	public static Task AbortSave(long token) => FinishSave(new(Operation.AbortSave, string.Empty, token: token));
+	public static async Task<ConfigStatePreparation.Result> PrepareState(ConfigStatePreparation.Request request)
+		=> (await Enqueue(new(Operation.PrepareState, string.Empty, state: request)).ConfigureAwait(false)).State!;
 
 	private static Task<Result> Enqueue(Request request)
 	{
@@ -187,6 +192,8 @@ internal static class ConfigFileWorker
 	{
 		switch (request.Operation)
 		{
+			case Operation.PrepareState:
+				return new() { State = ConfigStatePreparation.Process(request.State!) };
 			case Operation.EnsureDirectories:
 				Directory.CreateDirectory(request.Path);
 				Directory.CreateDirectory(request.Destination!);

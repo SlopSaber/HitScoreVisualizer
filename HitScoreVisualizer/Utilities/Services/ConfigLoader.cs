@@ -127,7 +127,7 @@ public class ConfigLoader : IInitializable
 	{
 		var config = await TryLoadConfig(file);
 		var version = config?.GetVersion() ?? Plugin.Metadata.HVersion;
-		var state = configMigrator.GetConfigState(config, file.Name);
+		var state = await configMigrator.GetConfigStateAsync(config, file.Name);
 		var description = state.GetConfigDescription(version);
 		return new(file, description, state)
 		{

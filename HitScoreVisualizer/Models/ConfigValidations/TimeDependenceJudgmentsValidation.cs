@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using UnityEngine;
 
@@ -5,7 +6,9 @@ namespace HitScoreVisualizer.Models.ConfigValidations;
 
 internal class TimeDependenceJudgmentsValidation : IConfigValidation
 {
-	public bool IsValid(HsvConfigModel config)
+	public bool IsValid(HsvConfigModel config) => IsValid(config, message => Plugin.Log.Warn(message));
+
+	public bool IsValid(HsvConfigModel config, Action<string> warning)
 	{
 		var judgments = config.TimeDependenceJudgments;
 		if (judgments is null || judgments.Count <= 1)
@@ -19,7 +22,7 @@ internal class TimeDependenceJudgmentsValidation : IConfigValidation
 
 		if (!isOrdered)
 		{
-			Plugin.Log.Warn("Time dependence judgments are not correctly ordered; they should be ordered from highest to lowest threshold");
+			warning("Time dependence judgments are not correctly ordered; they should be ordered from highest to lowest threshold");
 			return false;
 		}
 
@@ -29,7 +32,7 @@ internal class TimeDependenceJudgmentsValidation : IConfigValidation
 
 		if (hasDuplicate)
 		{
-			Plugin.Log.Warn("Time dependence judgments contain a duplicate threshold");
+			warning("Time dependence judgments contain a duplicate threshold");
 			return false;
 		}
 

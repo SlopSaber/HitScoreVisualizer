@@ -13,7 +13,9 @@ internal class JudgmentSegmentsValidation : IConfigValidation
 		this.propertyGetter = propertyGetter;
 	}
 
-	public bool IsValid(HsvConfigModel config)
+	public bool IsValid(HsvConfigModel config) => IsValid(config, message => Plugin.Log.Warn(message));
+
+	public bool IsValid(HsvConfigModel config, Action<string> warning)
 	{
 		var segments = propertyGetter(config);
 		if (segments is null || segments.Count <= 1)
@@ -27,7 +29,7 @@ internal class JudgmentSegmentsValidation : IConfigValidation
 
 		if (!isOrdered)
 		{
-			Plugin.Log.Warn("Judgment segments are not correctly ordered; they should be ordered from highest to lowest threshold");
+			warning("Judgment segments are not correctly ordered; they should be ordered from highest to lowest threshold");
 			return false;
 		}
 
@@ -37,7 +39,7 @@ internal class JudgmentSegmentsValidation : IConfigValidation
 
 		if (hasDuplicate)
 		{
-			Plugin.Log.Warn("Judgment segments contain a duplicate threshold");
+			warning("Judgment segments contain a duplicate threshold");
 			return false;
 		}
 

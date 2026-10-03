@@ -1,4 +1,5 @@
 
+using System.Collections.Generic;
 using System.Linq;
 using HitScoreVisualizer.Models;
 using HitScoreVisualizer.Models.ConfigValidations;
@@ -17,6 +18,11 @@ internal static class HsvConfigValidation
 		new TimeDependenceDecimalValidation(),
 		new TimeDependenceJudgmentsValidation()
 	];
+
+	internal static bool Validate(this HsvConfigModel configuration, List<string> warnings)
+	{
+		return Validations.All(validation => validation.IsValid(configuration, warnings.Add));
+	}
 
 	public static bool Validate(this HsvConfigModel configuration)
 	{
