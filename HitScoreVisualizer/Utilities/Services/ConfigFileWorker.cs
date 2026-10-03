@@ -31,9 +31,10 @@ internal static class ConfigFileWorker
 		public readonly long Token;
 		public readonly HsvConfigModel? Config;
 		public readonly CultureInfo? Culture;
+		public readonly ConfigJsonPreparation.VectorReadChannel? VectorReads;
 		public readonly TaskCompletionSource<Result> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		public Request(Operation operation, string path, string? destination = null, string? text = null, long token = 0, HsvConfigModel? config = null, CultureInfo? culture = null)
+		public Request(Operation operation, string path, string? destination = null, string? text = null, long token = 0, HsvConfigModel? config = null, CultureInfo? culture = null, ConfigJsonPreparation.VectorReadChannel? vectorReads = null)
 		{
 			Operation = operation;
 			Path = path;
@@ -42,6 +43,7 @@ internal static class ConfigFileWorker
 			Token = token;
 			Config = config;
 			Culture = culture;
+			VectorReads = vectorReads;
 		}
 	}
 
@@ -62,7 +64,17 @@ internal static class ConfigFileWorker
 		return (result.Token, result.Text!);
 	}
 	public static Task EndRead(long token) => FinishSave(new(Operation.EndRead, string.Empty, token: token));
-	public static async Task<HsvConfigModel?> PrepareRead(long token, CultureInfo culture) => (await FinishSave(new(Operation.PrepareRead, string.Empty, token: token, culture: culture)).ConfigureAwait(false)).Config;
+	public static async Task<HsvConfigModel?> PrepareRead(long token, CultureInfo culture)
+	{
+		var vectorReads = new ConfigJsonPreparation.VectorReadChannel();
+		var completion = FinishSave(new(Operation.PrepareRead, string.Empty, token: token, culture: culture, vectorReads: vectorReads));
+		while (!completion.IsCompleted)
+		{
+			vectorReads.CompletePendingOnCaller();
+			await Task.WhenAny(completion, vectorReads.Changed);
+		}
+		return (await completion.ConfigureAwait(false)).Config;
+	}
 	public static Task MoveIfExists(string source, string destination) => Enqueue(new(Operation.MoveIfExists, source, destination));
 	public static Task Backup(string source, string destination) => Enqueue(new(Operation.Backup, source, destination));
 	public static Task Delete(string path) => Enqueue(new(Operation.Delete, path));
@@ -262,7 +274,7 @@ internal static class ConfigFileWorker
 			}
 			try
 			{
-				finish.Completion.SetResult(new() { Config = ConfigJsonPreparation.Parse(content!, finish.Culture!) });
+				finish.Completion.SetResult(new() { Config = ConfigJsonPreparation.Parse(content!, finish.Culture!, finish.VectorReads!) });
 			}
 			catch (Exception parseError)
 			{

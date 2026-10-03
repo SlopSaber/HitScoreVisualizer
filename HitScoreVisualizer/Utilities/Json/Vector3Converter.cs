@@ -1,5 +1,5 @@
 ﻿using System;
-using System.IO;
+using HitScoreVisualizer.Utilities.Services;
 using Newtonsoft.Json;
 using UnityEngine;
 
@@ -7,11 +7,11 @@ namespace HitScoreVisualizer.Utilities.Json;
 
 internal class Vector3Converter : JsonConverter
 {
-	private readonly bool useGlobalDefaults;
+	private readonly ConfigJsonPreparation.VectorReadChannel? vectorReads;
 
-	internal Vector3Converter(bool useGlobalDefaults = true)
+	internal Vector3Converter(ConfigJsonPreparation.VectorReadChannel? vectorReads = null)
 	{
-		this.useGlobalDefaults = useGlobalDefaults;
+		this.vectorReads = vectorReads;
 	}
 
 	public override bool CanConvert(Type objectType)
@@ -27,15 +27,11 @@ internal class Vector3Converter : JsonConverter
 			return objectType == typeof(Vector3) ? default(Vector3) : null!;
 		}
 
-		if (useGlobalDefaults)
+		if (vectorReads is null)
 		{
 			return JsonConvert.DeserializeObject<Vector3>(t.ToString());
 		}
-		using var text = new StringReader(t.ToString());
-		using var nestedReader = new JsonTextReader(text);
-		var nestedSerializer = JsonSerializer.Create();
-		nestedSerializer.CheckAdditionalContent = true;
-		return nestedSerializer.Deserialize<Vector3>(nestedReader);
+		return vectorReads.Read(t.ToString());
 	}
 
 	public override void WriteJson(JsonWriter writer, object? value, JsonSerializer serializer)

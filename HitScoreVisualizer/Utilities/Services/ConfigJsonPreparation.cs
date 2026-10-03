@@ -5,10 +5,12 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 using HitScoreVisualizer.Models;
 using HitScoreVisualizer.Utilities.Json;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
+using UnityEngine;
 
 namespace HitScoreVisualizer.Utilities.Services;
 
@@ -108,7 +110,7 @@ internal static class ConfigJsonPreparation
 		return copy;
 	}
 
-	internal static HsvConfigModel? Parse(string content, CultureInfo culture)
+	internal static HsvConfigModel? Parse(string content, CultureInfo culture, VectorReadChannel vectorReads)
 	{
 		var previous = Thread.CurrentThread.CurrentCulture;
 		try
@@ -116,7 +118,7 @@ internal static class ConfigJsonPreparation
 			Thread.CurrentThread.CurrentCulture = culture;
 			using var text = new StringReader(content);
 			using var reader = new JsonTextReader(text);
-			var serializer = JsonSerializer.Create(CreateSettings());
+			var serializer = JsonSerializer.Create(CreateSettings(vectorReads));
 			serializer.CheckAdditionalContent = true;
 			return serializer.Deserialize<HsvConfigModel>(reader);
 		}
@@ -143,14 +145,79 @@ internal static class ConfigJsonPreparation
 		}
 	}
 
-	private static JsonSerializerSettings CreateSettings() => new()
+	private static JsonSerializerSettings CreateSettings(VectorReadChannel? vectorReads = null) => new()
 	{
 		DefaultValueHandling = DefaultValueHandling.Include,
 		NullValueHandling = NullValueHandling.Ignore,
 		Formatting = Formatting.Indented,
-		Converters = [new Vector3Converter(false), new StringEnumConverter(), new ColorArrayConverter()],
-		ContractResolver = new HsvConfigContractResolver()
+		Converters = [new Vector3Converter(vectorReads), new StringEnumConverter(), new ColorArrayConverter()],
+		ContractResolver = new WorkerConfigContractResolver()
 	};
+
+	private sealed class WorkerConfigContractResolver : HsvConfigContractResolver { }
+
+	internal sealed class VectorReadChannel
+	{
+		private sealed class Request
+		{
+			internal readonly string Text;
+			internal readonly TaskCompletionSource<Vector3> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+			internal Request(string text) => Text = text;
+		}
+
+		private readonly object gate = new();
+		private readonly Queue<Request> pending = new();
+		private TaskCompletionSource<bool> changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		internal Task Changed
+		{
+			get
+			{
+				lock (gate)
+				{
+					return changed.Task;
+				}
+			}
+		}
+
+		internal Vector3 Read(string text)
+		{
+			var request = new Request(text);
+			lock (gate)
+			{
+				pending.Enqueue(request);
+				changed.TrySetResult(true);
+			}
+			return request.Completion.Task.GetAwaiter().GetResult();
+		}
+
+		internal void CompletePendingOnCaller()
+		{
+			while (true)
+			{
+				Request request;
+				lock (gate)
+				{
+					if (pending.Count == 0)
+					{
+						return;
+					}
+					request = pending.Dequeue();
+					if (pending.Count == 0)
+					{
+						changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+					}
+				}
+				try
+				{
+					request.Completion.SetResult(JsonConvert.DeserializeObject<Vector3>(request.Text));
+				}
+				catch (Exception error)
+				{
+					request.Completion.SetException(error);
+				}
+			}
+		}
+	}
 
 	private sealed class IdentityComparer : IEqualityComparer<object>
 	{
