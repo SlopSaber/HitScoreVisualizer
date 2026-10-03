@@ -1,4 +1,7 @@
 using System.IO;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -12,6 +15,15 @@ internal static class HitTextOverlay
 	private static Shader? overlayShader;
 	private static bool shaderLoadAttempted;
 	private static bool shaderChoiceLogged;
+	private static BundleReadRequest? preparedBundle;
+
+	public static void PrepareResource()
+	{
+		if (!shaderLoadAttempted)
+		{
+			preparedBundle ??= new BundleReadRequest(typeof(HitTextOverlay).Assembly);
+		}
+	}
 
 	public static void Configure(TextMeshPro text)
 	{
@@ -46,16 +58,16 @@ internal static class HitTextOverlay
 		}
 
 		shaderLoadAttempted = true;
-		using var stream = typeof(HitTextOverlay).Assembly.GetManifestResourceStream(BundleResourceName);
-		if (stream == null)
+		var request = preparedBundle ?? new BundleReadRequest(typeof(HitTextOverlay).Assembly);
+		preparedBundle = null;
+		var bytes = request.Complete();
+		if (bytes == null)
 		{
 			Plugin.Log.Error("HSV no-bloom overlay shader bundle is missing.");
 			return null;
 		}
 
-		using var memory = new MemoryStream();
-		stream.CopyTo(memory);
-		overlayBundle = AssetBundle.LoadFromMemory(memory.ToArray());
+		overlayBundle = AssetBundle.LoadFromMemory(bytes);
 		if (overlayBundle == null)
 		{
 			Plugin.Log.Error("HSV no-bloom overlay shader bundle could not be opened.");
@@ -76,5 +88,53 @@ internal static class HitTextOverlay
 		}
 
 		return overlayShader;
+	}
+
+	private sealed class BundleReadRequest
+	{
+		private readonly Assembly assembly;
+		private readonly ManualResetEventSlim physicalReady = new(false);
+		private readonly Task<byte[]?> readTask;
+
+		public BundleReadRequest(Assembly assembly)
+		{
+			this.assembly = assembly;
+			readTask = Task.Factory.StartNew(Read, CancellationToken.None,
+				TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+		}
+
+		public byte[]? Complete()
+		{
+			// Wait for physical work before observing the task to prevent execution on a cold caller.
+			physicalReady.Wait();
+			try
+			{
+				return readTask.GetAwaiter().GetResult();
+			}
+			finally
+			{
+				physicalReady.Dispose();
+			}
+		}
+
+		private byte[]? Read()
+		{
+			try
+			{
+				using var stream = assembly.GetManifestResourceStream(BundleResourceName);
+				if (stream == null)
+				{
+					return null;
+				}
+
+				using var memory = new MemoryStream();
+				stream.CopyTo(memory);
+				return memory.ToArray();
+			}
+			finally
+			{
+				physicalReady.Set();
+			}
+		}
 	}
 }

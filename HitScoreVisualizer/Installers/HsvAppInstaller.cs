@@ -1,5 +1,6 @@
 using HitScoreVisualizer.HarmonyPatches;
 using HitScoreVisualizer.UI;
+using HitScoreVisualizer.Utilities;
 using HitScoreVisualizer.Utilities.Services;
 using JetBrains.Annotations;
 using Zenject;
@@ -18,6 +19,7 @@ internal sealed class HsvAppInstaller : Installer
 
 	public override void InstallBindings()
 	{
+		HitTextOverlay.PrepareResource();
 		Container.BindInstance(pluginConfig);
 		Container.Bind<PluginDirectories>().AsSingle();
 
