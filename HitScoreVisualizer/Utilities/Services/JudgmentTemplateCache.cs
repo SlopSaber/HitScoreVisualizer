@@ -22,7 +22,12 @@ internal static class JudgmentTemplateCache
 		{
 			throw new NullReferenceException();
 		}
-		return Prepare(text).GetAwaiter().GetResult();
+		var task = Prepare(text);
+		if (!task.IsCompleted)
+		{
+			((IAsyncResult)task).AsyncWaitHandle.WaitOne();
+		}
+		return task.GetAwaiter().GetResult();
 	}
 
 	internal static void Prewarm(HsvConfigModel config)
