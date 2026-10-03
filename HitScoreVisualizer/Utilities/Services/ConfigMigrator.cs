@@ -108,7 +108,14 @@ internal class ConfigMigrator
 		foreach (var migration in migrations.Where((m => m.Version >= configInfo.Config.GetVersion())))
 		{
 			Plugin.Log.Debug($"Running migration {migration.Version} on {configInfo.ConfigName}");
-			migration.Migrate(configInfo.Config);
+			if (ConfigMigrationPreparation.TryCapture(migration, configInfo.Config, out var capture))
+			{
+				var result = await ConfigFileWorker.PrepareMigration(capture.WorkerRequest);
+				if (!isCurrent()) return configInfo;
+				if (capture.IsUnchanged()) capture.Apply(result);
+				else migration.Migrate(configInfo.Config);
+			}
+			else migration.Migrate(configInfo.Config);
 		}
 
 		configInfo.Config.SetVersion(Plugin.Metadata.HVersion);

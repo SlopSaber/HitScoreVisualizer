@@ -44,9 +44,12 @@ internal static class ConfigJsonPreparation
 	}
 
 	internal static bool TrySnapshot(HsvConfigModel? source, out HsvConfigModel? snapshot)
+		=> TrySnapshot(source, out snapshot, out _);
+
+	internal static bool TrySnapshot(HsvConfigModel? source, out HsvConfigModel? snapshot, out Dictionary<object, object> copies)
 	{
 		Warmup();
-		var copies = new Dictionary<object, object>(IdentityComparer.Instance);
+		copies = new Dictionary<object, object>(IdentityComparer.Instance);
 		var supported = true;
 		snapshot = CloneNode(source, copies, ref supported);
 		if (snapshot is null)

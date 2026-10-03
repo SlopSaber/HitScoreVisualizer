@@ -11,7 +11,7 @@ namespace HitScoreVisualizer.Utilities.Services;
 
 internal static class ConfigFileWorker
 {
-	private enum Operation { EnsureDirectories, Catalog, Exists, BeginRead, PrepareRead, EndRead, MoveIfExists, Backup, Delete, OpenFolder, BeginSave, CommitSave, CommitConfig, AbortSave, PrepareState }
+	private enum Operation { EnsureDirectories, Catalog, Exists, BeginRead, PrepareRead, EndRead, MoveIfExists, Backup, Delete, OpenFolder, BeginSave, CommitSave, CommitConfig, AbortSave, PrepareState, PrepareMigration }
 
 	private sealed class Result
 	{
@@ -21,6 +21,7 @@ internal static class ConfigFileWorker
 		public long Token;
 		public HsvConfigModel? Config;
 		public ConfigStatePreparation.Result? State;
+		public ConfigMigrationPreparation.Result? Migration;
 	}
 
 	private sealed class Request
@@ -34,9 +35,10 @@ internal static class ConfigFileWorker
 		public readonly CultureInfo? Culture;
 		public readonly ConfigJsonPreparation.VectorReadChannel? VectorReads;
 		public readonly ConfigStatePreparation.Request? State;
+		public readonly ConfigMigrationPreparation.Request? Migration;
 		public readonly TaskCompletionSource<Result> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		public Request(Operation operation, string path, string? destination = null, string? text = null, long token = 0, HsvConfigModel? config = null, CultureInfo? culture = null, ConfigJsonPreparation.VectorReadChannel? vectorReads = null, ConfigStatePreparation.Request? state = null)
+		public Request(Operation operation, string path, string? destination = null, string? text = null, long token = 0, HsvConfigModel? config = null, CultureInfo? culture = null, ConfigJsonPreparation.VectorReadChannel? vectorReads = null, ConfigStatePreparation.Request? state = null, ConfigMigrationPreparation.Request? migration = null)
 		{
 			Operation = operation;
 			Path = path;
@@ -47,6 +49,7 @@ internal static class ConfigFileWorker
 			Culture = culture;
 			VectorReads = vectorReads;
 			State = state;
+			Migration = migration;
 		}
 	}
 
@@ -88,6 +91,9 @@ internal static class ConfigFileWorker
 	public static Task AbortSave(long token) => FinishSave(new(Operation.AbortSave, string.Empty, token: token));
 	public static async Task<ConfigStatePreparation.Result> PrepareState(ConfigStatePreparation.Request request)
 		=> (await Enqueue(new(Operation.PrepareState, string.Empty, state: request)).ConfigureAwait(false)).State!;
+
+	public static async Task<ConfigMigrationPreparation.Result> PrepareMigration(ConfigMigrationPreparation.Request request)
+		=> (await Enqueue(new(Operation.PrepareMigration, string.Empty, migration: request)).ConfigureAwait(false)).Migration!;
 
 	private static Task<Result> Enqueue(Request request)
 	{
@@ -192,6 +198,8 @@ internal static class ConfigFileWorker
 	{
 		switch (request.Operation)
 		{
+			case Operation.PrepareMigration:
+				return new() { Migration = ConfigMigrationPreparation.Process(request.Migration!) };
 			case Operation.PrepareState:
 				return new() { State = ConfigStatePreparation.Process(request.State!) };
 			case Operation.EnsureDirectories:
