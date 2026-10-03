@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using HitScoreVisualizer.Models;
+using HitScoreVisualizer.Utilities.Services;
 using UnityEngine;
 
 namespace HitScoreVisualizer.Utilities.Extensions;
@@ -48,18 +49,17 @@ internal static class JudgmentExtensions
 	private static string FormatTimeDependenceSegment(string unformattedText, float timeDependence, int tdDecimalOffset, int tdDecimalPrecision)
 	{
 		var builder = new StringBuilder();
-		var nextPercentIndex = unformattedText.IndexOf('%');
-		while (nextPercentIndex != -1)
+		var template = JudgmentTemplateCache.Get(unformattedText);
+		for (var i = 0; i < template.Count; i++)
 		{
-			builder.Append(unformattedText.Substring(0, nextPercentIndex));
-			if (unformattedText.Length == nextPercentIndex + 1)
+			var part = template[i];
+			if (!part.IsSpecifier)
 			{
-				unformattedText += " ";
+				builder.Append(part.Text);
+				continue;
 			}
 
-			var specifier = unformattedText[nextPercentIndex + 1];
-
-			switch (specifier)
+			switch (part.Specifier)
 			{
 				case 't':
 					builder.Append(ConvertTimeDependencePrecision(timeDependence, tdDecimalOffset, tdDecimalPrecision));
@@ -71,15 +71,12 @@ internal static class JudgmentExtensions
 					builder.Append("\n");
 					break;
 				default:
-					builder.Append("%" + specifier);
+					builder.Append(part.Text);
 					break;
 			}
-
-			unformattedText = unformattedText.Remove(0, nextPercentIndex + 2);
-			nextPercentIndex = unformattedText.IndexOf('%');
 		}
 
-		return builder.Append(unformattedText).ToString();
+		return builder.ToString();
 	}
 
 	private static string ConvertTimeDependencePrecision(float timeDependence, int decimalOffset, int decimalPrecision)

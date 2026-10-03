@@ -113,6 +113,7 @@ public class ConfigLoader : IInitializable
 
 		if (configInfo is { Config: not null, State: ConfigState.Compatible })
 		{
+			JudgmentTemplateCache.Prewarm(configInfo.Config);
 			Plugin.Log.Info($"Selecting config {configInfo.ConfigName}");
 			pluginConfig.SelectedConfig = configInfo;
 			pluginConfig.ConfigFilePath = configInfo.File.FullName.Substring(directories.Configs.FullName.Length + 1);
@@ -141,7 +142,12 @@ public class ConfigLoader : IInitializable
 			var (token, content) = await ConfigFileWorker.BeginRead(file.FullName);
 			try
 			{
-				return JsonConvert.DeserializeObject<HsvConfigModel>(content, configSerializerSettings);
+				var config = JsonConvert.DeserializeObject<HsvConfigModel>(content, configSerializerSettings);
+				if (config is not null)
+				{
+					JudgmentTemplateCache.Prewarm(config);
+				}
+				return config;
 			}
 			finally
 			{

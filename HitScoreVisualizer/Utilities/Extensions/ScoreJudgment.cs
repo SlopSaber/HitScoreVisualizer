@@ -1,5 +1,6 @@
 using System.Text;
 using HitScoreVisualizer.Models;
+using HitScoreVisualizer.Utilities.Services;
 using UnityEngine;
 
 namespace HitScoreVisualizer.Utilities.Extensions;
@@ -100,21 +101,20 @@ internal static class ScoreJudgment
 	private static string FormatJudgmentText(this HsvConfigModel config, string unformattedText, in JudgmentDetails details)
 	{
 		var formattedBuilder = new StringBuilder();
-		var nextPercentIndex = unformattedText.IndexOf('%');
+		var template = JudgmentTemplateCache.Get(unformattedText);
 
 		var timeDependence = Mathf.Abs(details.CutInfo.cutNormal.z);
 
-		while (nextPercentIndex != -1)
+		for (var i = 0; i < template.Count; i++)
 		{
-			formattedBuilder.Append(unformattedText.Substring(0, nextPercentIndex));
-			if (unformattedText.Length == nextPercentIndex + 1)
+			var part = template[i];
+			if (!part.IsSpecifier)
 			{
-				unformattedText += " ";
+				formattedBuilder.Append(part.Text);
+				continue;
 			}
 
-			var specifier = unformattedText[nextPercentIndex + 1];
-
-			formattedBuilder.Append(specifier switch
+			formattedBuilder.Append(part.Specifier switch
 			{
 				'b' => details.BeforeCutScore,
 				'c' => details.CenterCutScore,
@@ -129,13 +129,10 @@ internal static class ScoreJudgment
 				'p' => $"{(double) details.TotalCutScore / details.MaxPossibleScore * 100:0}",
 				'%' => "%",
 				'n' => "\n",
-				_ => $"%{specifier}"
+				_ => $"%{part.Specifier}"
 			});
-
-			unformattedText = unformattedText.Remove(0, nextPercentIndex + 2);
-			nextPercentIndex = unformattedText.IndexOf('%');
 		}
 
-		return formattedBuilder.Append(unformattedText).ToString();
+		return formattedBuilder.ToString();
 	}
 }
