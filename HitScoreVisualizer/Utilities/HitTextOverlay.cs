@@ -99,9 +99,21 @@ internal static class HitTextOverlay
 		public BundleReadRequest(Assembly assembly)
 		{
 			this.assembly = assembly;
-			readTask = Task.Factory.StartNew(Read, CancellationToken.None,
-				TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+			if (ExecutionContext.IsFlowSuppressed())
+			{
+				readTask = ScheduleRead();
+			}
+			else
+			{
+				using (ExecutionContext.SuppressFlow())
+				{
+					readTask = ScheduleRead();
+				}
+			}
 		}
+
+		private Task<byte[]?> ScheduleRead() => Task.Factory.StartNew(Read, CancellationToken.None,
+			TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
 
 		public byte[]? Complete()
 		{
