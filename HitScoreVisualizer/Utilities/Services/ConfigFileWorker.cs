@@ -1,15 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using HitScoreVisualizer.Models;
 
 namespace HitScoreVisualizer.Utilities.Services;
 
 internal static class ConfigFileWorker
 {
-	private enum Operation { EnsureDirectories, Catalog, Exists, BeginRead, EndRead, MoveIfExists, Backup, Delete, OpenFolder, BeginSave, CommitSave, AbortSave }
+	private enum Operation { EnsureDirectories, Catalog, Exists, BeginRead, PrepareRead, EndRead, MoveIfExists, Backup, Delete, OpenFolder, BeginSave, CommitSave, CommitConfig, AbortSave }
 
 	private sealed class Result
 	{
@@ -17,6 +19,7 @@ internal static class ConfigFileWorker
 		public string? Text;
 		public bool Exists;
 		public long Token;
+		public HsvConfigModel? Config;
 	}
 
 	private sealed class Request
@@ -26,15 +29,19 @@ internal static class ConfigFileWorker
 		public readonly string? Destination;
 		public readonly string? Text;
 		public readonly long Token;
+		public readonly HsvConfigModel? Config;
+		public readonly CultureInfo? Culture;
 		public readonly TaskCompletionSource<Result> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		public Request(Operation operation, string path, string? destination = null, string? text = null, long token = 0)
+		public Request(Operation operation, string path, string? destination = null, string? text = null, long token = 0, HsvConfigModel? config = null, CultureInfo? culture = null)
 		{
 			Operation = operation;
 			Path = path;
 			Destination = destination;
 			Text = text;
 			Token = token;
+			Config = config;
+			Culture = culture;
 		}
 	}
 
@@ -55,12 +62,14 @@ internal static class ConfigFileWorker
 		return (result.Token, result.Text!);
 	}
 	public static Task EndRead(long token) => FinishSave(new(Operation.EndRead, string.Empty, token: token));
+	public static async Task<HsvConfigModel?> PrepareRead(long token, CultureInfo culture) => (await FinishSave(new(Operation.PrepareRead, string.Empty, token: token, culture: culture)).ConfigureAwait(false)).Config;
 	public static Task MoveIfExists(string source, string destination) => Enqueue(new(Operation.MoveIfExists, source, destination));
 	public static Task Backup(string source, string destination) => Enqueue(new(Operation.Backup, source, destination));
 	public static Task Delete(string path) => Enqueue(new(Operation.Delete, path));
 	public static Task OpenFolder(string path) => Enqueue(new(Operation.OpenFolder, path));
 	public static async Task<long> BeginSave(string path) => (await Enqueue(new(Operation.BeginSave, path)).ConfigureAwait(false)).Token;
 	public static Task CommitSave(long token, string text) => FinishSave(new(Operation.CommitSave, string.Empty, text: text, token: token));
+	public static Task CommitConfig(long token, HsvConfigModel? snapshot, CultureInfo culture) => FinishSave(new(Operation.CommitConfig, string.Empty, token: token, config: snapshot, culture: culture));
 	public static Task AbortSave(long token) => FinishSave(new(Operation.AbortSave, string.Empty, token: token));
 
 	private static Task<Result> Enqueue(Request request)
@@ -95,8 +104,24 @@ internal static class ConfigFileWorker
 
 	private static void StartWorker()
 	{
-		worker = Task.Factory.StartNew(ProcessQueue, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
-		worker.ContinueWith(Completed, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+		var suppressed = ExecutionContext.IsFlowSuppressed();
+		var flow = default(AsyncFlowControl);
+		try
+		{
+			if (!suppressed)
+			{
+				flow = ExecutionContext.SuppressFlow();
+			}
+			worker = Task.Factory.StartNew(ProcessQueue, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+			worker.ContinueWith(Completed, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+		}
+		finally
+		{
+			if (!suppressed)
+			{
+				flow.Undo();
+			}
+		}
 	}
 
 	private static void ProcessQueue()
@@ -219,15 +244,30 @@ internal static class ConfigFileWorker
 		}
 		begin.Completion.SetResult(new() { Token = token, Text = content });
 
-		// Keep the original file lock through owner JSON callbacks. Only the matching finish can pass this operation.
+		// Keep the file lock through JSON preparation and owner callbacks. Only matching token phases can pass this operation.
 		Request finish;
-		lock (gate)
+		while (true)
 		{
-			while (!saveCompletions.TryGetValue(token, out finish!))
+			lock (gate)
 			{
-				Monitor.Wait(gate);
+				while (!saveCompletions.TryGetValue(token, out finish!))
+				{
+					Monitor.Wait(gate);
+				}
+				saveCompletions.Remove(token);
 			}
-			saveCompletions.Remove(token);
+			if (finish.Operation is not Operation.PrepareRead)
+			{
+				break;
+			}
+			try
+			{
+				finish.Completion.SetResult(new() { Config = ConfigJsonPreparation.Parse(content!, finish.Culture!) });
+			}
+			catch (Exception parseError)
+			{
+				finish.Completion.SetException(parseError);
+			}
 		}
 
 		Exception? error = null;
@@ -238,6 +278,10 @@ internal static class ConfigFileWorker
 				if (finish.Operation is Operation.CommitSave)
 				{
 					((StreamWriter)handle).Write(finish.Text);
+				}
+				else if (finish.Operation is Operation.CommitConfig)
+				{
+					((StreamWriter)handle).Write(ConfigJsonPreparation.Serialize(finish.Config, finish.Culture!));
 				}
 			}
 		}

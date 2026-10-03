@@ -142,7 +142,16 @@ public class ConfigLoader : IInitializable
 			var (token, content) = await ConfigFileWorker.BeginRead(file.FullName);
 			try
 			{
-				var config = JsonConvert.DeserializeObject<HsvConfigModel>(content, configSerializerSettings);
+				HsvConfigModel? config;
+				if (ConfigJsonPreparation.TryCaptureCulture(out var culture))
+				{
+					ConfigJsonPreparation.Warmup();
+					config = await ConfigFileWorker.PrepareRead(token, culture);
+				}
+				else
+				{
+					config = JsonConvert.DeserializeObject<HsvConfigModel>(content, configSerializerSettings);
+				}
 				if (config is not null)
 				{
 					JudgmentTemplateCache.Prewarm(config);
@@ -172,17 +181,32 @@ public class ConfigLoader : IInitializable
 
 			Plugin.Log.Info($"Saving config {config.ConfigName}");
 			var token = await ConfigFileWorker.BeginSave(config.File.FullName);
-			string content;
+			string content = string.Empty;
+			bool prepared;
+			HsvConfigModel? snapshot;
+			System.Globalization.CultureInfo culture;
 			try
 			{
-				content = JsonConvert.SerializeObject(config.Config, Formatting.Indented, configSerializerSettings);
+				snapshot = null;
+				prepared = ConfigJsonPreparation.TryCaptureCulture(out culture) && ConfigJsonPreparation.TrySnapshot(config.Config, out snapshot);
+				if (!prepared)
+				{
+					content = JsonConvert.SerializeObject(config.Config, Formatting.Indented, configSerializerSettings);
+				}
 			}
 			catch
 			{
 				await ConfigFileWorker.AbortSave(token);
 				throw;
 			}
-			await ConfigFileWorker.CommitSave(token, content);
+			if (prepared)
+			{
+				await ConfigFileWorker.CommitConfig(token, snapshot, culture);
+			}
+			else
+			{
+				await ConfigFileWorker.CommitSave(token, content);
+			}
 		}
 		catch (Exception e)
 		{
