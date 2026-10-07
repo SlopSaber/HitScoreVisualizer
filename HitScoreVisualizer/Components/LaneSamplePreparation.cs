@@ -24,6 +24,8 @@ internal static class LaneSamplePreparation
 	private static ConditionalWeakTable<GameplayCoreSceneSetupData, OrderedPreparation> preparedOrders = new();
 	private static readonly Guid customModule = new("259554d3-934a-42b5-8db1-54a77cbc58e2");
 	private static Task? inFlight;
+	private static HitScoreVisualizer.Utilities.Services.ConfigLoader? configLoader;
+	private static CancellationTokenSource? readinessLifetime;
 	private static int ownerThread;
 	private static int revision;
 	private static bool active;
@@ -42,9 +44,10 @@ internal static class LaneSamplePreparation
 		[FieldOffset(0)] public int Bits;
 	}
 
-	internal static void Enable()
+	internal static void Enable(HitScoreVisualizer.Utilities.Services.ConfigLoader loader)
 	{
 		ownerThread = Thread.CurrentThread.ManagedThreadId;
+		configLoader = loader;
 		active = true;
 		Retire();
 	}
@@ -53,11 +56,15 @@ internal static class LaneSamplePreparation
 	{
 		active = false;
 		Retire();
+		configLoader = null;
 	}
 
 	private static void Retire()
 	{
 		revision++;
+		readinessLifetime?.Cancel();
+		readinessLifetime?.Dispose();
+		readinessLifetime = active ? new CancellationTokenSource() : null;
 		prepared = new ConditionalWeakTable<GameplayCoreSceneSetupData, Preparation>();
 		preparedOrders = new ConditionalWeakTable<GameplayCoreSceneSetupData, OrderedPreparation>();
 	}
@@ -72,17 +79,29 @@ internal static class LaneSamplePreparation
 		}
 
 		Retire();
-		__result = PrepareAfterLoading(__instance, __result, revision);
+		__result = PrepareAfterLoading(__instance, __result, revision, readinessLifetime!.Token);
 	}
 
 	private static async Task PrepareAfterLoading(LevelScenesTransitionSetupData setup, Task loading,
-		int capturedRevision)
+		int capturedRevision, CancellationToken readinessToken)
 	{
 		await loading;
 		Task? work = null;
 		try
 		{
-			if (!IsCurrent(capturedRevision) || inFlight is { IsCompleted: false })
+			if (!IsCurrent(capturedRevision))
+			{
+				return;
+			}
+
+			var loader = configLoader;
+			if (loader != null)
+			{
+				await loader.WaitForReadiness(readinessToken);
+			}
+
+			if (!IsCurrent(capturedRevision) || readinessToken.IsCancellationRequested ||
+			    inFlight is { IsCompleted: false })
 			{
 				return;
 			}

@@ -19,6 +19,9 @@ public class ConfigLoader : IInitializable
 	private readonly PluginDirectories directories;
 
 	private Task? initializationTask;
+	private readonly TaskCompletionSource<bool> initializationCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+	private TaskCompletionSource<bool>? selectionCompleted;
+	private TaskCompletionSource<bool> selectionChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
 	private long selectionRevision;
 	private readonly JsonSerializerSettings configSerializerSettings = new()
 	{
@@ -48,6 +51,40 @@ public class ConfigLoader : IInitializable
 		catch (Exception ex)
 		{
 			Plugin.Log.Error($"Problem encountered while initializing loader:\n {ex}");
+		}
+		finally
+		{
+			initializationCompleted.TrySetResult(true);
+		}
+	}
+
+	internal async Task WaitForReadiness(System.Threading.CancellationToken cancellationToken)
+	{
+		var retired = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		using (cancellationToken.Register(static state =>
+			((TaskCompletionSource<bool>)state!).TrySetResult(true), retired))
+		{
+			while (!cancellationToken.IsCancellationRequested)
+			{
+				var selection = selectionCompleted?.Task;
+				var changed = selectionChanged.Task;
+				await Task.WhenAny(initializationCompleted.Task, retired.Task);
+				if (cancellationToken.IsCancellationRequested)
+				{
+					return;
+				}
+
+				if (selection != null)
+				{
+					await Task.WhenAny(selection, changed, retired.Task);
+				}
+
+				if (cancellationToken.IsCancellationRequested ||
+				    ReferenceEquals(selection, selectionCompleted?.Task))
+				{
+					return;
+				}
+			}
 		}
 	}
 
@@ -79,7 +116,30 @@ public class ConfigLoader : IInitializable
 
 	internal Task<bool> TrySelectConfig(ConfigInfo? configInfo) => TrySelectConfig(configInfo, null);
 
-	internal async Task<bool> TrySelectConfig(ConfigInfo? configInfo, Func<bool>? mayPublish)
+	internal Task<bool> TrySelectConfig(ConfigInfo? configInfo, Func<bool>? mayPublish)
+	{
+		var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		selectionCompleted = completion;
+		var changed = selectionChanged;
+		selectionChanged = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		changed.TrySetResult(true);
+		return SelectAndComplete(configInfo, mayPublish, completion);
+	}
+
+	private async Task<bool> SelectAndComplete(ConfigInfo? configInfo, Func<bool>? mayPublish,
+		TaskCompletionSource<bool> completion)
+	{
+		try
+		{
+			return await TrySelectConfigInternal(configInfo, mayPublish);
+		}
+		finally
+		{
+			completion.TrySetResult(true);
+		}
+	}
+
+	private async Task<bool> TrySelectConfigInternal(ConfigInfo? configInfo, Func<bool>? mayPublish)
 	{
 		if (mayPublish is not null && !mayPublish())
 		{
