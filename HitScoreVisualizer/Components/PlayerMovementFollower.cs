@@ -56,7 +56,10 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 		else
 		{
 			var customDataProperties = new Dictionary<Type, PropertyInfo?>();
-			foreach (var note in beatmapData.GetBeatmapDataItems<NoteData>(0).OrderBy(note => note.time))
+			var notes = LaneSamplePreparation.TryConsumeOrder(sceneData, beatmapData, out var orderedNotes)
+				? (IEnumerable<NoteData>)orderedNotes
+				: beatmapData.GetBeatmapDataItems<NoteData>(0).OrderBy(note => note.time);
+			foreach (var note in notes)
 			{
 				if (note.gameplayType == NoteData.GameplayType.Bomb ||
 				    (laneSamples.Count > 0 && Mathf.Approximately(laneSamples[laneSamples.Count - 1].Time, note.time)))

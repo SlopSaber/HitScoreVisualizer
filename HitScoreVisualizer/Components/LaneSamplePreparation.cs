@@ -21,7 +21,9 @@ internal static class LaneSamplePreparation
 	private static readonly FieldInfo? listsField = groupsField?.FieldType.GetField(
 		"_items", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static ConditionalWeakTable<GameplayCoreSceneSetupData, Preparation> prepared = new();
-	private static Task<List<PlayerMovementFollower.LaneSample>>? inFlight;
+	private static ConditionalWeakTable<GameplayCoreSceneSetupData, OrderedPreparation> preparedOrders = new();
+	private static readonly Guid customModule = new("259554d3-934a-42b5-8db1-54a77cbc58e2");
+	private static Task? inFlight;
 	private static int ownerThread;
 	private static int revision;
 	private static bool active;
@@ -30,6 +32,8 @@ internal static class LaneSamplePreparation
 	private sealed record Request(Input[] Inputs, Quaternion Rotation, float Epsilon);
 	private sealed record Preparation(WeakReference<IReadonlyBeatmapData> Data, NoteData[] Notes,
 		Input[] Inputs, List<PlayerMovementFollower.LaneSample> Samples, int Revision);
+	private sealed record OrderedPreparation(WeakReference<IReadonlyBeatmapData> Data, NoteData[] Notes,
+		float[] Times, int[] Order, int Revision);
 
 	[StructLayout(LayoutKind.Explicit)]
 	private struct FloatBits
@@ -55,6 +59,7 @@ internal static class LaneSamplePreparation
 	{
 		revision++;
 		prepared = new ConditionalWeakTable<GameplayCoreSceneSetupData, Preparation>();
+		preparedOrders = new ConditionalWeakTable<GameplayCoreSceneSetupData, OrderedPreparation>();
 	}
 
 	[HarmonyPostfix]
@@ -74,7 +79,7 @@ internal static class LaneSamplePreparation
 		int capturedRevision)
 	{
 		await loading;
-		Task<List<PlayerMovementFollower.LaneSample>>? work = null;
+		Task? work = null;
 		try
 		{
 			if (!IsCurrent(capturedRevision) || inFlight is { IsCompleted: false })
@@ -90,26 +95,61 @@ internal static class LaneSamplePreparation
 			}
 
 			var data = scene.transformedBeatmapData;
-			if (data == null || !TrySnapshot(data, out var notes, out var inputs))
+			if (data == null)
+			{
+				return;
+			}
+
+			if (TryOrderSnapshot(data, out var orderedNotes, out var times))
+			{
+				Task<int[]> ordering;
+				if (ExecutionContext.IsFlowSuppressed())
+				{
+					ordering = StartOrder(times);
+				}
+				else
+				{
+					using (ExecutionContext.SuppressFlow())
+					{
+						ordering = StartOrder(times);
+					}
+				}
+
+				work = ordering;
+				inFlight = ordering;
+				var order = await ordering;
+				if (IsCurrent(capturedRevision) && ReferenceEquals(scene, setup.gameplayCoreSceneSetupData) &&
+				    ReferenceEquals(data, scene.transformedBeatmapData))
+				{
+					preparedOrders.Add(scene, new OrderedPreparation(new WeakReference<IReadonlyBeatmapData>(data),
+						orderedNotes, times, order, capturedRevision));
+				}
+
+				return;
+			}
+
+			if (!TrySnapshot(data, out var notes, out var inputs))
 			{
 				return;
 			}
 
 			var request = new Request(inputs, Quaternion.identity, Mathf.Epsilon);
+			Task<List<PlayerMovementFollower.LaneSample>> sampling;
 			if (ExecutionContext.IsFlowSuppressed())
 			{
-				work = Start(request);
+				sampling = Start(request);
 			}
 			else
 			{
 				using (ExecutionContext.SuppressFlow())
 				{
-					work = Start(request);
+					sampling = Start(request);
 				}
 			}
 
-			inFlight = work;
-			var samples = await work;
+			work = sampling;
+			inFlight = sampling;
+			var samples = await sampling;
 			if (IsCurrent(capturedRevision) && ReferenceEquals(scene, setup.gameplayCoreSceneSetupData) &&
 			    ReferenceEquals(data, scene.transformedBeatmapData))
 			{
@@ -137,6 +177,12 @@ internal static class LaneSamplePreparation
 		Task.Factory.StartNew(static state => CreateSamples((Request)state!), request,
 			CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
 
+	private static Task<int[]> StartOrder(float[] times) => Task.Factory.StartNew(static state =>
+	{
+		var keys = (float[])state!;
+		return Enumerable.Range(0, keys.Length).OrderBy(index => keys[index]).ToArray();
+	}, times, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+
 	private static List<PlayerMovementFollower.LaneSample> CreateSamples(Request request)
 	{
 		var samples = new List<PlayerMovementFollower.LaneSample>(request.Inputs.Length);
@@ -160,10 +206,12 @@ internal static class LaneSamplePreparation
 
 	private static float Max(float a, float b) => a > b ? a : b;
 
-	private static bool TryGetNotes(IReadonlyBeatmapData data, out LinkedList<BeatmapDataItem> notes)
+	private static bool TryGetNotes(IReadonlyBeatmapData data, out LinkedList<BeatmapDataItem> notes,
+		Type? customNote = null)
 	{
 		notes = null!;
-		if (data == null || data.GetType() != typeof(BeatmapData) || groupsField == null || listsField == null)
+		if (data == null || customNote == null && data.GetType() != typeof(BeatmapData) ||
+		    groupsField == null || listsField == null)
 		{
 			return false;
 		}
@@ -187,13 +235,112 @@ internal static class LaneSamplePreparation
 
 		if (!lists.TryGetValue((typeof(NoteData), 0), out var list) || list == null ||
 		    list.GetType() != typeof(global::SortedList<NoteData, BeatmapDataItem>) &&
-		    list.GetType() != typeof(global::SortedList<BeatmapDataItem>))
+		    list.GetType() != typeof(global::SortedList<BeatmapDataItem>) &&
+		    (customNote == null || list.GetType() != typeof(global::SortedList<,>).MakeGenericType(
+			    customNote, typeof(BeatmapDataItem))))
 		{
 			return false;
 		}
 
 		notes = list.items;
 		return notes != null;
+	}
+
+	private static Type? CustomNoteType(IReadonlyBeatmapData data)
+	{
+		var type = data.GetType();
+		if (!type.IsSealed || type.BaseType != typeof(BeatmapData) ||
+		    type.FullName != "CustomJSONData.CustomBeatmap.CustomBeatmapData" ||
+		    type.Module.ModuleVersionId != customModule)
+		{
+			return null;
+		}
+
+		var noteType = type.Assembly.GetType("CustomJSONData.CustomBeatmap.CustomNoteData", false);
+		return noteType?.BaseType == typeof(NoteData) ? noteType : null;
+	}
+
+	private static bool TryOrderSnapshot(IReadonlyBeatmapData data, out NoteData[] notes, out float[] times)
+	{
+		notes = Array.Empty<NoteData>();
+		times = Array.Empty<float>();
+		var customNote = CustomNoteType(data);
+		if (customNote == null || !TryGetNotes(data, out var current, customNote) ||
+		    current.Count < MinimumNotes || current.Count > MaximumNotes)
+		{
+			return false;
+		}
+
+		notes = new NoteData[current.Count];
+		times = new float[notes.Length];
+		var index = 0;
+		foreach (var item in current)
+		{
+			if (item is not NoteData note ||
+			    note.GetType() != customNote && note.GetType() != typeof(NoteData) || index >= notes.Length)
+			{
+				return false;
+			}
+
+			notes[index] = note;
+			times[index++] = note.time;
+		}
+
+		return index == notes.Length;
+	}
+
+	internal static bool TryConsumeOrder(GameplayCoreSceneSetupData scene, IReadonlyBeatmapData data,
+		out NoteData[] orderedNotes)
+	{
+		orderedNotes = null!;
+		if (!active || Thread.CurrentThread.ManagedThreadId != ownerThread ||
+		    !preparedOrders.TryGetValue(scene, out var result))
+		{
+			return false;
+		}
+
+		preparedOrders.Remove(scene);
+		try
+		{
+			var customNote = CustomNoteType(data);
+			if (!IsCurrent(result.Revision) || !result.Data.TryGetTarget(out var expected) ||
+			    !ReferenceEquals(expected, data) || !ReferenceEquals(data, scene.transformedBeatmapData) ||
+			    customNote == null || !TryGetNotes(data, out var current, customNote) ||
+			    current.Count != result.Notes.Length)
+			{
+				return false;
+			}
+
+			var index = 0;
+			foreach (var item in current)
+			{
+				if (index >= result.Notes.Length || !ReferenceEquals(item, result.Notes[index]) ||
+				    new FloatBits { Value = ((NoteData)item).time }.Bits !=
+				    new FloatBits { Value = result.Times[index] }.Bits)
+				{
+					return false;
+				}
+
+				index++;
+			}
+
+			if (index != result.Notes.Length)
+			{
+				return false;
+			}
+
+			orderedNotes = new NoteData[result.Order.Length];
+			for (var i = 0; i < orderedNotes.Length; i++)
+			{
+				orderedNotes[i] = result.Notes[result.Order[i]];
+			}
+
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 	private static bool TrySnapshot(IReadonlyBeatmapData data, out NoteData[] notes, out Input[] inputs)
