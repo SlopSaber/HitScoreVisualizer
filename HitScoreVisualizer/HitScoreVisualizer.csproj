@@ -51,6 +51,10 @@
 			<HintPath>$(GameDirectory)\Beat Saber_Data\Managed\BeatSaber.ViewSystem.dll</HintPath>
 			<Private>false</Private>
 		</Reference>
+		<Reference Include="BGLib.AppFlow">
+			<HintPath>$(GameDirectory)\Beat Saber_Data\Managed\BGLib.AppFlow.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
 		<Reference Include="BGLib.DotnetExtension">
 			<HintPath>$(GameDirectory)\Beat Saber_Data\Managed\BGLib.DotnetExtension.dll</HintPath>
 			<Private>false</Private>
