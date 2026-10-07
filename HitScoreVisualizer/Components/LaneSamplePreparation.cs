@@ -90,7 +90,7 @@ internal static class LaneSamplePreparation
 			}
 
 			var data = scene.transformedBeatmapData;
-			if (!TrySnapshot(data, out var notes, out var inputs))
+			if (data == null || !TrySnapshot(data, out var notes, out var inputs))
 			{
 				return;
 			}
