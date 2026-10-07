@@ -14,6 +14,7 @@ internal class HarmonyPatchManager : IInitializable, IDisposable
 	{
 		try
 		{
+			HitScoreVisualizer.Components.LaneSamplePreparation.Enable();
 			harmony.PatchAll(executingAssembly);
 		}
 		catch (Exception e)
@@ -24,6 +25,7 @@ internal class HarmonyPatchManager : IInitializable, IDisposable
 
 	public void Dispose()
 	{
+		HitScoreVisualizer.Components.LaneSamplePreparation.Disable();
 		harmony.UnpatchSelf();
 	}
 }

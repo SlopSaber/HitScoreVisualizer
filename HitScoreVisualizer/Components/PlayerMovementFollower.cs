@@ -10,7 +10,7 @@ namespace HitScoreVisualizer.Components;
 
 internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposable
 {
-	private readonly record struct LaneSample(float Time, Quaternion Rotation, string[] Tracks);
+	internal readonly record struct LaneSample(float Time, Quaternion Rotation, string[] Tracks);
 
 	private readonly PlayerTransforms playerTransforms;
 	private readonly BeatmapObjectManager beatmapObjectManager;
@@ -49,23 +49,30 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 			return;
 		}
 
-		var customDataProperties = new Dictionary<Type, PropertyInfo?>();
-		foreach (var note in beatmapData.GetBeatmapDataItems<NoteData>(0).OrderBy(note => note.time))
+		if (LaneSamplePreparation.TryConsume(sceneData, beatmapData, out var preparedSamples))
 		{
-			if (note.gameplayType == NoteData.GameplayType.Bomb ||
-			    (laneSamples.Count > 0 && Mathf.Approximately(laneSamples[laneSamples.Count - 1].Time, note.time)))
+			laneSamples = preparedSamples;
+		}
+		else
+		{
+			var customDataProperties = new Dictionary<Type, PropertyInfo?>();
+			foreach (var note in beatmapData.GetBeatmapDataItems<NoteData>(0).OrderBy(note => note.time))
 			{
-				continue;
-			}
+				if (note.gameplayType == NoteData.GameplayType.Bomb ||
+				    (laneSamples.Count > 0 && Mathf.Approximately(laneSamples[laneSamples.Count - 1].Time, note.time)))
+				{
+					continue;
+				}
 
-			var noteType = note.GetType();
-			if (!customDataProperties.TryGetValue(noteType, out var customDataProperty))
-			{
-				customDataProperty = noteType.GetProperty("customData");
-				customDataProperties.Add(noteType, customDataProperty);
+				var noteType = note.GetType();
+				if (!customDataProperties.TryGetValue(noteType, out var customDataProperty))
+				{
+					customDataProperty = noteType.GetProperty("customData");
+					customDataProperties.Add(noteType, customDataProperty);
+				}
+				var customData = customDataProperty?.GetValue(note) as IDictionary<string, object>;
+				laneSamples.Add(new LaneSample(note.time, ReadRotation(customData), ReadTracks(customData)));
 			}
-			var customData = customDataProperty?.GetValue(note) as IDictionary<string, object>;
-			laneSamples.Add(new LaneSample(note.time, ReadRotation(customData), ReadTracks(customData)));
 		}
 
 		hasLaneRotation = laneSamples.Any(sample => Quaternion.Angle(sample.Rotation, Quaternion.identity) > 0.01f ||
