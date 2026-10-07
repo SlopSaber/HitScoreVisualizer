@@ -186,6 +186,17 @@ internal static class LaneSamplePreparation
 			{
 				inFlight = null;
 			}
+
+			if (IsCurrent(capturedRevision) && !readinessToken.IsCancellationRequested && configLoader is { } currentLoader)
+			{
+				try
+				{
+					await currentLoader.WaitForReadiness(readinessToken);
+				}
+				catch
+				{
+				}
+			}
 		}
 	}
 
