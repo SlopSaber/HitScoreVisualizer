@@ -14,6 +14,8 @@ internal sealed class LanePresencePreparation : IDisposable
 	private const int ProbeCount = 64;
 
 	private Task<bool>? work;
+	private int preparedCount = PrefixCount;
+	private bool failed;
 
 	private readonly struct PresenceValue(Quaternion rotation, int trackCount)
 	{
@@ -51,11 +53,7 @@ internal sealed class LanePresencePreparation : IDisposable
 			}
 
 			var request = new Request(values, identity);
-			if (ExecutionContext.IsFlowSuppressed())
-				preparation.work = Start(request);
-			else
-				using (ExecutionContext.SuppressFlow())
-					preparation.work = Start(request);
+			preparation.StartWork(request);
 			return preparation;
 		}
 		catch (Exception)
@@ -74,6 +72,40 @@ internal sealed class LanePresencePreparation : IDisposable
 		return false;
 	}, request, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
 
+	private void StartWork(Request request)
+	{
+		if (ExecutionContext.IsFlowSuppressed())
+			work = Start(request);
+		else
+			using (ExecutionContext.SuppressFlow())
+				work = Start(request);
+	}
+
+	internal void TryAppend(List<PlayerMovementFollower.LaneSample> samples)
+	{
+		if (failed || work == null || !work.IsCompleted || samples.Count - preparedCount < PrefixCount)
+			return;
+		try
+		{
+			if (work.GetAwaiter().GetResult())
+				return;
+
+			var values = new PresenceValue[PrefixCount];
+			for (var i = 0; i < PrefixCount; i++)
+			{
+				var sample = samples[preparedCount + i];
+				values[i] = new PresenceValue(sample.Rotation, sample.Tracks.Length);
+			}
+			StartWork(new Request(values, Quaternion.identity));
+			preparedCount += PrefixCount;
+		}
+		catch (Exception)
+		{
+			failed = true;
+			TryWait(out _);
+		}
+	}
+
 	internal bool TryComplete(List<PlayerMovementFollower.LaneSample> samples, out bool result)
 	{
 		if (work == null)
@@ -81,13 +113,13 @@ internal sealed class LanePresencePreparation : IDisposable
 			result = true;
 			return true;
 		}
-		if (!TryWait(out result))
+		if (!TryWait(out result) || failed)
 			return false;
 		if (result)
 			return true;
 
 		var identity = Quaternion.identity;
-		for (var i = PrefixCount; i < samples.Count; i++)
+		for (var i = preparedCount; i < samples.Count; i++)
 		{
 			var sample = samples[i];
 			if (Quaternion.Angle(sample.Rotation, identity) > 0.01f || sample.Tracks.Length > 0)

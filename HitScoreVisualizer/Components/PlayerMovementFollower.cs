@@ -85,9 +85,12 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 					laneSamples.Add(new LaneSample(note.time, ReadRotation(customData), ReadTracks(customData)));
 					if (hasPreparedOrder && orderedNotes.Length >= LanePresencePreparation.MinimumNotes &&
 					    orderedNotes.Length - processedNoteCount >= LanePresencePreparation.MinimumRemainingNotes &&
-					    laneSamples.Count == LanePresencePreparation.PrefixCount)
+					    laneSamples.Count % LanePresencePreparation.PrefixCount == 0)
 					{
-						presence = LanePresencePreparation.TryStart(laneSamples);
+						if (laneSamples.Count == LanePresencePreparation.PrefixCount)
+							presence = LanePresencePreparation.TryStart(laneSamples);
+						else
+							presence?.TryAppend(laneSamples);
 					}
 				}
 
