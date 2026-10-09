@@ -35,7 +35,31 @@ internal static class LaneSamplePreparation
 	private sealed record Preparation(WeakReference<IReadonlyBeatmapData> Data, NoteData[] Notes,
 		Input[] Inputs, List<PlayerMovementFollower.LaneSample> Samples, int Revision);
 	private sealed record OrderedPreparation(WeakReference<IReadonlyBeatmapData> Data, NoteData[] Notes,
-		float[] Times, int[] Order, int Revision);
+		float[] Times, OrderResult Result, int Revision);
+	private sealed record OrderRequest(float[] Times, float Epsilon);
+	private sealed record OrderResult(int[] Order, bool[] Adjacent, float Epsilon);
+
+	internal sealed class Adjacency
+	{
+		private readonly float[] times;
+		private readonly int[] order;
+		private readonly bool[] adjacent;
+		private readonly float epsilon;
+
+		internal Adjacency(float[] times, int[] order, bool[] adjacent, float epsilon)
+		{
+			this.times = times;
+			this.order = order;
+			this.adjacent = adjacent;
+			this.epsilon = epsilon;
+		}
+
+		internal bool IsDuplicate(int index, float previous, float current) =>
+			index > 0 && index < order.Length && previous == times[order[index - 1]] &&
+			current == times[order[index]] && Mathf.Epsilon == epsilon
+				? adjacent[index]
+				: Mathf.Approximately(previous, current);
+	}
 
 	[StructLayout(LayoutKind.Explicit)]
 	private struct FloatBits
@@ -121,16 +145,17 @@ internal static class LaneSamplePreparation
 
 			if (TryOrderSnapshot(data, out var orderedNotes, out var times))
 			{
-				Task<int[]> ordering;
+				var orderRequest = new OrderRequest(times, Mathf.Epsilon);
+				Task<OrderResult> ordering;
 				if (ExecutionContext.IsFlowSuppressed())
 				{
-					ordering = StartOrder(times);
+					ordering = StartOrder(orderRequest);
 				}
 				else
 				{
 					using (ExecutionContext.SuppressFlow())
 					{
-						ordering = StartOrder(times);
+						ordering = StartOrder(orderRequest);
 					}
 				}
 
@@ -207,11 +232,16 @@ internal static class LaneSamplePreparation
 		Task.Factory.StartNew(static state => CreateSamples((Request)state!), request,
 			CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
 
-	private static Task<int[]> StartOrder(float[] times) => Task.Factory.StartNew(static state =>
+	private static Task<OrderResult> StartOrder(OrderRequest request) => Task.Factory.StartNew(static state =>
 	{
-		var keys = (float[])state!;
-		return Enumerable.Range(0, keys.Length).OrderBy(index => keys[index]).ToArray();
-	}, times, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+		var input = (OrderRequest)state!;
+		var keys = input.Times;
+		var order = Enumerable.Range(0, keys.Length).OrderBy(index => keys[index]).ToArray();
+		var adjacent = new bool[order.Length];
+		for (var i = 1; i < order.Length; i++)
+			adjacent[i] = Approximately(keys[order[i - 1]], keys[order[i]], input.Epsilon);
+		return new OrderResult(order, adjacent, input.Epsilon);
+	}, request, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
 
 	private static List<PlayerMovementFollower.LaneSample> CreateSamples(Request request)
 	{
@@ -320,8 +350,12 @@ internal static class LaneSamplePreparation
 	}
 
 	internal static bool TryConsumeOrder(GameplayCoreSceneSetupData scene, IReadonlyBeatmapData data,
-		out NoteData[] orderedNotes)
+		out NoteData[] orderedNotes) => TryConsumeOrder(scene, data, out orderedNotes, out _);
+
+	internal static bool TryConsumeOrder(GameplayCoreSceneSetupData scene, IReadonlyBeatmapData data,
+		out NoteData[] orderedNotes, out Adjacency? adjacency)
 	{
+		adjacency = null;
 		orderedNotes = null!;
 		if (!active || Thread.CurrentThread.ManagedThreadId != ownerThread ||
 		    !preparedOrders.TryGetValue(scene, out var result))
@@ -359,12 +393,13 @@ internal static class LaneSamplePreparation
 				return false;
 			}
 
-			orderedNotes = new NoteData[result.Order.Length];
+			orderedNotes = new NoteData[result.Result.Order.Length];
 			for (var i = 0; i < orderedNotes.Length; i++)
 			{
-				orderedNotes[i] = result.Notes[result.Order[i]];
+				orderedNotes[i] = result.Notes[result.Result.Order[i]];
 			}
 
+			adjacency = new Adjacency(result.Times, result.Result.Order, result.Result.Adjacent, result.Result.Epsilon);
 			return true;
 		}
 		catch

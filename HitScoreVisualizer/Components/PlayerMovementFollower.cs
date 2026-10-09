@@ -57,11 +57,14 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 		else
 		{
 			var customDataProperties = new Dictionary<Type, PropertyInfo?>();
-			var hasPreparedOrder = LaneSamplePreparation.TryConsumeOrder(sceneData, beatmapData, out var orderedNotes);
+			var hasPreparedOrder = LaneSamplePreparation.TryConsumeOrder(sceneData, beatmapData, out var orderedNotes, out var adjacency);
 			var notes = hasPreparedOrder
 				? (IEnumerable<NoteData>)orderedNotes
 				: beatmapData.GetBeatmapDataItems<NoteData>(0).OrderBy(note => note.time);
 			var processedNoteCount = 0;
+			static bool IsDuplicate(float previous, float current, LaneSamplePreparation.Adjacency? adjacency, int index) =>
+				adjacency != null ? adjacency.IsDuplicate(index, previous, current) : Mathf.Approximately(previous, current);
+
 			LanePresencePreparation? presence = null;
 			try
 			{
@@ -70,7 +73,7 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 					if (hasPreparedOrder)
 						processedNoteCount++;
 					if (note.gameplayType == NoteData.GameplayType.Bomb ||
-					    (laneSamples.Count > 0 && Mathf.Approximately(laneSamples[laneSamples.Count - 1].Time, note.time)))
+					    (laneSamples.Count > 0 && IsDuplicate(laneSamples[laneSamples.Count - 1].Time, note.time, adjacency, processedNoteCount - 1)))
 					{
 						continue;
 					}
