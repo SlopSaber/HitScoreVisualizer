@@ -57,29 +57,49 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 		else
 		{
 			var customDataProperties = new Dictionary<Type, PropertyInfo?>();
-			var notes = LaneSamplePreparation.TryConsumeOrder(sceneData, beatmapData, out var orderedNotes)
+			var hasPreparedOrder = LaneSamplePreparation.TryConsumeOrder(sceneData, beatmapData, out var orderedNotes);
+			var notes = hasPreparedOrder
 				? (IEnumerable<NoteData>)orderedNotes
 				: beatmapData.GetBeatmapDataItems<NoteData>(0).OrderBy(note => note.time);
-			foreach (var note in notes)
+			var processedNoteCount = 0;
+			LanePresencePreparation? presence = null;
+			try
 			{
-				if (note.gameplayType == NoteData.GameplayType.Bomb ||
-				    (laneSamples.Count > 0 && Mathf.Approximately(laneSamples[laneSamples.Count - 1].Time, note.time)))
+				foreach (var note in notes)
 				{
-					continue;
+					if (hasPreparedOrder)
+						processedNoteCount++;
+					if (note.gameplayType == NoteData.GameplayType.Bomb ||
+					    (laneSamples.Count > 0 && Mathf.Approximately(laneSamples[laneSamples.Count - 1].Time, note.time)))
+					{
+						continue;
+					}
+
+					var noteType = note.GetType();
+					if (!customDataProperties.TryGetValue(noteType, out var customDataProperty))
+					{
+						customDataProperty = noteType.GetProperty("customData");
+						customDataProperties.Add(noteType, customDataProperty);
+					}
+					var customData = customDataProperty?.GetValue(note) as IDictionary<string, object>;
+					laneSamples.Add(new LaneSample(note.time, ReadRotation(customData), ReadTracks(customData)));
+					if (hasPreparedOrder && orderedNotes.Length >= LanePresencePreparation.MinimumNotes &&
+					    orderedNotes.Length - processedNoteCount >= LanePresencePreparation.MinimumRemainingNotes &&
+					    laneSamples.Count == LanePresencePreparation.PrefixCount)
+					{
+						presence = LanePresencePreparation.TryStart(laneSamples);
+					}
 				}
 
-				var noteType = note.GetType();
-				if (!customDataProperties.TryGetValue(noteType, out var customDataProperty))
-				{
-					customDataProperty = noteType.GetProperty("customData");
-					customDataProperties.Add(noteType, customDataProperty);
-				}
-				var customData = customDataProperty?.GetValue(note) as IDictionary<string, object>;
-				laneSamples.Add(new LaneSample(note.time, ReadRotation(customData), ReadTracks(customData)));
+				hasLaneRotation = presence != null && presence.TryComplete(laneSamples, out var preparedPresence)
+					? preparedPresence
+					: laneSamples.Any(sample => Quaternion.Angle(sample.Rotation, Quaternion.identity) > 0.01f ||
+											   sample.Tracks.Length > 0);
 			}
-
-			hasLaneRotation = laneSamples.Any(sample => Quaternion.Angle(sample.Rotation, Quaternion.identity) > 0.01f ||
-			                                         sample.Tracks.Length > 0);
+			finally
+			{
+				presence?.Dispose();
+			}
 		}
 	}
 
