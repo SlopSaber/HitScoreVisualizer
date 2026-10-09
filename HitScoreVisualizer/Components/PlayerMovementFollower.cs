@@ -52,6 +52,7 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 		if (LaneSamplePreparation.TryConsume(sceneData, beatmapData, out var preparedSamples))
 		{
 			laneSamples = preparedSamples;
+			hasLaneRotation = false;
 		}
 		else
 		{
@@ -76,10 +77,10 @@ internal class PlayerMovementFollower : IInitializable, ILateTickable, IDisposab
 				var customData = customDataProperty?.GetValue(note) as IDictionary<string, object>;
 				laneSamples.Add(new LaneSample(note.time, ReadRotation(customData), ReadTracks(customData)));
 			}
-		}
 
-		hasLaneRotation = laneSamples.Any(sample => Quaternion.Angle(sample.Rotation, Quaternion.identity) > 0.01f ||
-		                                         sample.Tracks.Length > 0);
+			hasLaneRotation = laneSamples.Any(sample => Quaternion.Angle(sample.Rotation, Quaternion.identity) > 0.01f ||
+			                                         sample.Tracks.Length > 0);
+		}
 	}
 
 	private Transform? PlayerOrigin => playerTransforms._originTransform.parent;
